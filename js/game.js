@@ -1,261 +1,34 @@
-const game = {
-    year: 1,
-    worldName: "THẾ GIỚI",
-    population: [],
-    settlements: [],
-    countries: [],
-    events: [],
-    settings: { population: 100, resources: 1, climate: "temperate" }
-};
-
-class Person {
-    constructor(id, x, y) {
-        this.id = id;
-        this.age = randomInt(16, 40);
-        this.x = x;
-        this.y = y;
-        this.alive = true;
-        this.settlementId = null;
-        this.family = null;
-    }
-}
-
-function randomInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
-function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
-function distance(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
-function formatNumber(n) { return Math.round(n).toLocaleString("vi-VN"); }
-
-function addEvent(text) {
-    game.events.unshift(`Năm ${game.year}: ${text}`);
-    if (game.events.length > 40) game.events.pop();
-}
-
-function createInitialWorld() {
-    game.year = 1;
-    game.population = [];
-    game.settlements = [];
-    game.countries = [];
-    game.events = [];
-
-    const count = game.settings.population;
-    for (let i = 1; i <= count; i++) {
-        const x = 0.18 + Math.random() * 0.64;
-        const y = 0.18 + Math.random() * 0.64;
-        game.population.push(new Person(i, x, y));
-    }
-
-    addEvent(`Thế giới ${game.worldName} được hình thành.`);
-    addEvent(`${count} con người đầu tiên xuất hiện.`);
-    addEvent("Chưa có quốc gia nào. Lịch sử bắt đầu từ con số không.");
-    updateUI();
-    resizeCanvas();
-}
-
-function simulateYear() {
-    game.year++;
-
-    for (const p of game.population) {
-        if (!p.alive) continue;
-        p.age++;
-        if (p.age > 72 && Math.random() < Math.min(0.5, (p.age - 72) * 0.025)) p.alive = false;
-    }
-
-    const alive = game.population.filter(p => p.alive);
-    const adults = alive.filter(p => p.age >= 18 && p.age <= 40);
-    const birthRate = 0.035 * game.settings.resources;
-
-    for (const p of adults) {
-        if (Math.random() < birthRate) {
-            const baby = new Person(game.population.length + 1, clamp(p.x + (Math.random() - .5) * .035, .05, .95), clamp(p.y + (Math.random() - .5) * .035, .05, .95));
-            baby.age = 0;
-            game.population.push(baby);
-        }
-    }
-
-    for (const p of game.population) {
-        if (!p.alive) continue;
-        if (p.age > 1 && Math.random() < 0.03) {
-            p.x = clamp(p.x + (Math.random() - .5) * 0.015, .05, .95);
-            p.y = clamp(p.y + (Math.random() - .5) * 0.015, .05, .95);
-        }
-    }
-
-    formSettlements();
-    growSettlements();
-    formCountries();
-
-    if (Math.random() < 0.025) {
-        const events = [
-            "Một nhóm người di cư đến vùng đất mới.",
-            "Một mùa thuận lợi giúp dân cư tăng nhanh.",
-            "Một cộng đồng bắt đầu tập trung quanh nguồn nước.",
-            "Những người trẻ bắt đầu rời quê hương để tìm vùng đất mới.",
-            "Một khu vực trở nên đông đúc hơn và bắt đầu hình thành trật tự xã hội."
-        ];
-        addEvent(events[randomInt(0, events.length - 1)]);
-    }
-}
-
-function formSettlements() {
-    const alive = game.population.filter(p => p.alive);
-    const unassigned = alive.filter(p => p.settlementId === null);
-
-    for (const p of unassigned) {
-        const nearby = alive.filter(q => q !== p && distance(p, q) < 0.055).length;
-        if (nearby >= 7) {
-            const existing = game.settlements.find(s => distance(s, p) < 0.07);
-            if (existing) {
-                p.settlementId = existing.id;
-                existing.population++;
-            } else if (game.settlements.length < 20) {
-                const settlement = {
-                    id: game.settlements.length + 1,
-                    name: generateSettlementName(),
-                    x: p.x,
-                    y: p.y,
-                    population: nearby + 1,
-                    age: 0,
-                    countryId: null
-                };
-                game.settlements.push(settlement);
-                p.settlementId = settlement.id;
-                for (const q of alive) {
-                    if (distance(settlement, q) < 0.07) q.settlementId = settlement.id;
-                }
-                addEvent(`Một khu định cư mới hình thành: ${settlement.name}.`);
-            }
-        }
-    }
-}
-
-function growSettlements() {
-    for (const s of game.settlements) {
-        s.age++;
-        s.population = game.population.filter(p => p.alive && p.settlementId === s.id).length;
-    }
-}
-
-function formCountries() {
-    const mature = game.settlements.filter(s => !s.countryId && s.population >= 25 && s.age >= 10);
-    for (const s of mature) {
-        if (Math.random() > 0.06) continue;
-        const country = {
-            id: game.countries.length + 1,
-            name: generateCountryName(),
-            settlementIds: [s.id],
-            population: s.population,
-            power: Math.max(1, s.population * 0.15)
-        };
-        game.countries.push(country);
-        s.countryId = country.id;
-        addEvent(`${country.name} ra đời từ ${s.name}. Một quốc gia đầu tiên xuất hiện.`);
-    }
-}
-
-function generateSettlementName() {
-    const a = ["An", "Bình", "Minh", "Tân", "Hòa", "Long", "Thanh", "Vĩnh", "Nam", "Phú"];
-    const b = ["Thủy", "Sơn", "Lâm", "Giang", "Phong", "Hà", "Nguyên", "Thịnh", "Châu", "Đô"];
-    return a[randomInt(0, a.length - 1)] + " " + b[randomInt(0, b.length - 1)];
-}
-
-function generateCountryName() {
-    const a = ["Vương quốc", "Liên bang", "Đế quốc", "Cộng hòa"];
-    const b = ["An", "Minh", "Hòa", "Long", "Nam", "Thanh", "Vĩnh"];
-    return a[randomInt(0, a.length - 1)] + " " + b[randomInt(0, b.length - 1)];
-}
-
-function runYears(years) {
-    for (let i = 0; i < years; i++) simulateYear();
-    updateUI();
-    drawWorld();
-}
-
-function updateUI() {
-    const alive = game.population.filter(p => p.alive).length;
-    document.getElementById("year").textContent = game.year;
-    document.getElementById("worldName").textContent = game.worldName;
-    document.getElementById("population").textContent = formatNumber(game.population.length);
-    document.getElementById("alive").textContent = formatNumber(alive);
-    document.getElementById("settlements").textContent = game.settlements.length;
-    document.getElementById("countries").textContent = game.countries.length;
-
-    const box = document.getElementById("events");
-    box.innerHTML = game.events.map(e => `<div class="event">${e}</div>`).join("");
-}
-
-const canvas = document.getElementById("worldCanvas");
-const ctx = canvas.getContext("2d");
-
-function resizeCanvas() {
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawWorld();
-}
-window.addEventListener("resize", resizeCanvas);
-
-function drawWorld() {
-    if (!canvas) return;
-    const w = canvas.clientWidth, h = canvas.clientHeight;
-    ctx.fillStyle = "#142b42";
-    ctx.fillRect(0, 0, w, h);
-
-    ctx.fillStyle = "#365b32";
-    ctx.beginPath();
-    ctx.moveTo(w*.10,h*.20); ctx.lineTo(w*.28,h*.10); ctx.lineTo(w*.48,h*.15); ctx.lineTo(w*.67,h*.27); ctx.lineTo(w*.83,h*.35); ctx.lineTo(w*.75,h*.63); ctx.lineTo(w*.57,h*.78); ctx.lineTo(w*.35,h*.86); ctx.lineTo(w*.18,h*.69); ctx.lineTo(w*.08,h*.44); ctx.closePath(); ctx.fill();
-
-    ctx.strokeStyle = "#3c7892"; ctx.lineWidth = 4; ctx.beginPath();
-    ctx.moveTo(w*.48,h*.15); ctx.bezierCurveTo(w*.42,h*.30,w*.58,h*.38,w*.48,h*.52); ctx.bezierCurveTo(w*.40,h*.66,w*.48,h*.73,w*.57,h*.78); ctx.stroke();
-
-    for (const s of game.settlements) {
-        const x=s.x*w, y=s.y*h;
-        ctx.fillStyle="#d6a94b"; ctx.beginPath(); ctx.arc(x,y,Math.min(8,4+s.population/20),0,Math.PI*2); ctx.fill();
-    }
-
-    for (const p of game.population) {
-        if (!p.alive) continue;
-        const x=p.x*w, y=p.y*h;
-        ctx.fillStyle="#e8eef5"; ctx.beginPath(); ctx.arc(x,y,2.5,0,Math.PI*2); ctx.fill();
-    }
-}
-
-function chooseButtons(containerId, callback) {
-    document.querySelectorAll(`#${containerId} button`).forEach(btn => btn.addEventListener("click", () => {
-        document.querySelectorAll(`#${containerId} button`).forEach(b => b.classList.remove("selected"));
-        btn.classList.add("selected");
-        callback(btn.dataset.value);
-    }));
-}
-
-document.getElementById("populationInput").addEventListener("input", e => document.getElementById("populationValue").textContent = e.target.value);
-chooseButtons("resourceChoices", value => game.settings.resources = Number(value));
-chooseButtons("climateChoices", value => game.settings.climate = value);
-
-document.getElementById("startButton").addEventListener("click", () => {
-    document.getElementById("introScreen").classList.add("hidden");
-    document.getElementById("setupScreen").classList.remove("hidden");
-});
-
-document.getElementById("backToIntro").addEventListener("click", () => {
-    document.getElementById("setupScreen").classList.add("hidden");
-    document.getElementById("introScreen").classList.remove("hidden");
-});
-
-document.getElementById("createWorldButton").addEventListener("click", () => {
-    const name = document.getElementById("worldNameInput").value.trim();
-    game.worldName = name || "THẾ GIỚI #001";
-    game.settings.population = Number(document.getElementById("populationInput").value);
-    document.getElementById("setupScreen").classList.add("hidden");
-    document.getElementById("gameScreen").classList.remove("hidden");
-    createInitialWorld();
-});
-
-document.getElementById("clearEvents").addEventListener("click", () => {
-    game.events = [];
-    updateUI();
-});
-
-resizeCanvas();
+/*
+ * WORLD-SIM — A living world simulation
+ * Copyright © 2026 PHAN HỮU KHÁNH
+ * All rights reserved.
+ *
+ * Mô phỏng: dân số, sinh tử, di cư, định cư, quốc gia,
+ * tài nguyên, khí hậu và các biến cố phát sinh từ trạng thái thế giới.
+ */
+const OWNER="PHAN HỮU KHÁNH";
+const game={year:1,worldName:"THẾ GIỚI",population:[],settlements:[],countries:[],events:[],eventKeys:new Set(),settings:{population:100,resources:1,climate:"temperate"},paused:false,timer:null,generation:1,lastEventYear:0,nextPopulationId:1,nextSettlementId:1,nextCountryId:1,stats:{births:0,deaths:0,migrations:0,disasters:0}};
+class Person{constructor(id,x,y,age=randomInt(16,40)){this.id=id;this.age=age;this.x=x;this.y=y;this.alive=true;this.settlementId=null;this.birthYear=game.year-age;this.energy=randomInt(55,95);this.health=randomInt(65,100)}}
+function randomInt(min,max){return Math.floor(Math.random()*(max-min+1))+min}function random(min,max){return Math.random()*(max-min)+min}function clamp(v,min,max){return Math.max(min,Math.min(max,v))}function distance(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}function formatNumber(n){return Math.round(n).toLocaleString("vi-VN")}function alivePeople(){return game.population.filter(p=>p.alive)}
+function addEvent(text,key=null,important=false){if(key&&game.eventKeys.has(key))return false;if(key)game.eventKeys.add(key);game.events.unshift({year:game.year,text,important});if(game.events.length>60)game.events.pop();return true}
+function createInitialWorld(){stopSimulation();game.year=1;game.population=[];game.settlements=[];game.countries=[];game.events=[];game.eventKeys=new Set();game.generation=1;game.lastEventYear=0;game.nextPopulationId=1;game.nextSettlementId=1;game.nextCountryId=1;game.stats={births:0,deaths:0,migrations:0,disasters:0};for(let i=0;i<game.settings.population;i++)game.population.push(new Person(game.nextPopulationId++,random(.18,.82),random(.18,.82)));addEvent(`Thế giới ${game.worldName} được hình thành.`,`world-created`,true);addEvent(`${game.settings.population} con người đầu tiên xuất hiện.`,`first-people`,true);addEvent("Chưa có quốc gia nào. Lịch sử bắt đầu từ con số không.","zero-countries");updateUI();resizeCanvas();startSimulation()}
+function startSimulation(){stopSimulation();game.paused=false;updatePauseButtons();game.timer=setInterval(()=>{if(!game.paused)runYears(1,true)},900)}function stopSimulation(){if(game.timer)clearInterval(game.timer);game.timer=null}function togglePause(){game.paused=!game.paused;updatePauseButtons();const h=document.getElementById("mapHint");if(h)h.textContent=game.paused?"Thời gian đã tạm dừng.":"Thời gian đang tự trôi..."}function updatePauseButtons(){const t=game.paused?"▶ TIẾP TỤC":"⏸ TẠM DỪNG";const a=document.getElementById("pauseButton"),b=document.getElementById("mobilePause");if(a)a.textContent=t;if(b)b.textContent=game.paused?"▶":"⏸"}
+function runYears(years,automatic=false){for(let i=0;i<Math.max(1,Math.floor(years));i++)simulateYear();updateUI();drawWorld()}
+function simulateYear(){game.year++;const climate=game.settings.climate,resource=game.settings.resources;const pressure=climate==="dry"?random(.8,1.25):climate==="wet"?random(.9,1.2):random(.95,1.08);const food=resource*pressure;for(const p of alivePeople()){p.age++;p.energy=clamp(p.energy+random(-8,7),0,100);p.health=clamp(p.health+random(-4,4),0,100);let death=0;if(p.age>=70)death=.008+(p.age-70)*.018;if(p.health<25)death+=.025;if(food<.7)death+=.012;if(Math.random()<Math.min(.8,death)){p.alive=false;game.stats.deaths++}}
+const adults=alivePeople().filter(p=>p.age>=18&&p.age<=42);const birthRate=(.018+resource*.012)*(climate==="temperate"?1.05:climate==="wet"?1:.9);for(const p of adults)if(Math.random()<birthRate){const baby=new Person(game.nextPopulationId++,clamp(p.x+random(-.025,.025),.04,.96),clamp(p.y+random(-.025,.025),.04,.96),0);baby.energy=randomInt(65,90);game.population.push(baby);game.stats.births++}
+for(const p of alivePeople()){const s=game.settlements.find(x=>x.id===p.settlementId),chance=s&&s.population>35?.055:.012;if(Math.random()<chance){p.x=clamp(p.x+random(-.045,.045),.04,.96);p.y=clamp(p.y+random(-.045,.045),.04,.96);p.settlementId=null;game.stats.migrations++}}
+formSettlements();growSettlements();formCountries();evolveCountries();generateWorldEvent();if(game.year%25===0){game.generation++;addEvent(`Một thế hệ mới đã bước lên sân khấu lịch sử. Thế giới đang ở năm ${game.year}.`,`generation-${game.year}`)}}
+function formSettlements(){const alive=alivePeople();for(const p of alive.filter(x=>x.settlementId===null)){const nearby=alive.filter(q=>q!==p&&distance(p,q)<.055);if(nearby.length<6)continue;const existing=game.settlements.find(s=>distance(s,p)<.065);if(existing){p.settlementId=existing.id;continue}if(game.settlements.length>=60)continue;const s={id:game.nextSettlementId++,name:generateUniqueSettlementName(),x:p.x,y:p.y,population:nearby.length+1,age:0,countryId:null,prosperity:random(35,65)};game.settlements.push(s);p.settlementId=s.id;for(const q of alive)if(distance(s,q)<.065)q.settlementId=s.id;addEvent(`Một cộng đồng định cư mới hình thành tại ${s.name}.`,`settlement-${s.id}`,true)}}
+function growSettlements(){for(const s of game.settlements){s.age++;const members=alivePeople().filter(p=>p.settlementId===s.id);s.population=members.length;s.prosperity=clamp(s.prosperity+random(-3,3)+(game.settings.resources-1)*8,0,100);if(s.population===0)s.abandoned=true}game.settlements=game.settlements.filter(s=>!s.abandoned||s.age<5)}
+function formCountries(){for(const s of game.settlements){if(s.countryId||s.population<25||s.age<12||Math.random()>.025)continue;const c={id:game.nextCountryId++,name:generateUniqueCountryName(),settlementIds:[s.id],population:s.population,power:Math.max(5,s.population*.12),age:0,wars:0};game.countries.push(c);s.countryId=c.id;addEvent(`${c.name} ra đời từ ${s.name}. Một quốc gia đầu tiên xuất hiện.`,`country-${c.id}`,true)}}
+function evolveCountries(){for(const c of game.countries){c.age++;const ss=game.settlements.filter(s=>c.settlementIds.includes(s.id));c.population=ss.reduce((a,s)=>a+s.population,0);c.power=Math.max(1,c.population*.12+c.age*.4+ss.length*4);if(c.age>15&&Math.random()<.015){const base=ss[0];const candidate=base&&game.settlements.find(s=>!s.countryId&&distance(s,base)<.13&&s.population>=12);if(candidate){candidate.countryId=c.id;c.settlementIds.push(candidate.id);addEvent(`${c.name} mở rộng ảnh hưởng tới ${candidate.name}.`,`annex-${c.id}-${candidate.id}`)}}}}
+function generateWorldEvent(){if(game.year-game.lastEventYear<2)return;const alive=alivePeople(),ss=game.settlements.filter(s=>s.population>0),cs=game.countries,roll=Math.random();let emitted=false;if(roll<.07&&alive.length){const region=["phía Bắc","phía Nam","phía Đông","phía Tây","vùng trung tâm"][randomInt(0,4)];emitted=addEvent(`Một làn sóng di cư hướng về ${region}, làm thay đổi phân bố dân cư.`,`migration-wave-${game.year}`)}else if(roll<.12&&ss.length){const s=ss[randomInt(0,ss.length-1)];s.prosperity=clamp(s.prosperity+random(5,15),0,100);emitted=addEvent(`${s.name} trải qua một mùa bội thu; dân cư và niềm tin vào tương lai tăng lên.`,`harvest-${game.year}`)}else if(roll<.16&&ss.length&&game.settings.climate==="dry"){const s=ss[randomInt(0,ss.length-1)];s.prosperity=clamp(s.prosperity-random(8,20),0,100);game.stats.disasters++;emitted=addEvent(`Hạn hán nghiêm trọng ảnh hưởng tới ${s.name}; nguồn sống bị suy giảm.`,`drought-${game.year}`,true)}else if(roll<.20&&ss.length&&game.settings.climate==="wet"){const s=ss[randomInt(0,ss.length-1)];s.prosperity=clamp(s.prosperity-random(5,15),0,100);game.stats.disasters++;emitted=addEvent(`Mưa lũ bất thường khiến ${s.name} phải di dời một phần dân cư.`,`flood-${game.year}`,true)}else if(roll<.24&&cs.length>=2){const a=cs[randomInt(0,cs.length-1)],other=cs.filter(c=>c.id!==a.id);const b=other[randomInt(0,other.length-1)];if(a&&b){addEvent(`${a.name} và ${b.name} bắt đầu tranh chấp ảnh hưởng. Quan hệ giữa hai nước xấu đi.`,`tension-${Math.min(a.id,b.id)}-${Math.max(a.id,b.id)}-${game.year}`);emitted=true}}else if(roll<.27&&ss.length){const s=ss[randomInt(0,ss.length-1)],ds=["kỹ thuật luyện kim sơ khai","cách bảo quản lương thực","công cụ canh tác mới","một tuyến đường thương mại","phương pháp xây dựng bền vững"],d=ds[randomInt(0,ds.length-1)];s.prosperity=clamp(s.prosperity+4,0,100);emitted=addEvent(`Người dân ${s.name} phát triển ${d}, mở ra một hướng phát triển mới.`,`discovery-${s.id}-${game.year}`)}if(emitted)game.lastEventYear=game.year}
+const SA=["An","Bình","Minh","Tân","Hòa","Long","Thanh","Vĩnh","Nam","Phú","Đông","Thịnh","Khải","Lâm","Quang"],SB=["Thủy","Sơn","Lâm","Giang","Phong","Hà","Nguyên","Thịnh","Châu","Đô","Bình","Việt","Khê","Hải","Phúc"],CA=["Vương quốc","Liên bang","Đế quốc","Cộng hòa","Liên minh","Đại công quốc"],CB=["An","Minh","Hòa","Long","Nam","Thanh","Vĩnh","Đông","Hải","Phúc","Thịnh","Việt"];
+function uniqueFrom(gen,names){for(let i=0;i<100;i++){const n=gen();if(!names.has(n))return n}return `${gen()} ${randomInt(2,999)}`}function generateUniqueSettlementName(){return uniqueFrom(()=>`${SA[randomInt(0,SA.length-1)]} ${SB[randomInt(0,SB.length-1)]}`,new Set(game.settlements.map(s=>s.name)))}function generateUniqueCountryName(){return uniqueFrom(()=>`${CA[randomInt(0,CA.length-1)]} ${CB[randomInt(0,CB.length-1)]}`,new Set(game.countries.map(c=>c.name)))}
+function updateUI(){const alive=alivePeople().length;document.getElementById("year").textContent=formatNumber(game.year);document.getElementById("worldName").textContent=game.worldName;document.getElementById("population").textContent=formatNumber(game.population.length);document.getElementById("alive").textContent=formatNumber(alive);document.getElementById("settlements").textContent=game.settlements.filter(s=>s.population>0).length;document.getElementById("countries").textContent=game.countries.length;document.getElementById("generation").textContent=game.generation;document.getElementById("resourceState").textContent=game.settings.resources<1?"Khan hiếm":game.settings.resources>1?"Dồi dào":"Cân bằng";document.getElementById("climateState").textContent=game.settings.climate==="dry"?"Khô":game.settings.climate==="wet"?"Ẩm":"Ôn hòa";renderEvents();updatePauseButtons()}
+function renderEvents(){const box=document.getElementById("events");box.innerHTML=game.events.map(e=>`<div class="event ${e.important?"important":""}"><strong>Năm ${e.year}</strong> · ${escapeHtml(e.text)}</div>`).join("")}function escapeHtml(t){return t.replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[c]))}
+const canvas=document.getElementById("worldCanvas"),ctx=canvas.getContext("2d");function resizeCanvas(){if(!canvas)return;const r=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;canvas.width=r.width*dpr;canvas.height=r.height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);drawWorld()}window.addEventListener("resize",resizeCanvas);
+function drawWorld(){if(!canvas)return;const w=canvas.clientWidth,h=canvas.clientHeight;ctx.fillStyle="#142b42";ctx.fillRect(0,0,w,h);ctx.fillStyle="#365b32";ctx.beginPath();ctx.moveTo(w*.10,h*.20);ctx.lineTo(w*.28,h*.10);ctx.lineTo(w*.48,h*.15);ctx.lineTo(w*.67,h*.27);ctx.lineTo(w*.83,h*.35);ctx.lineTo(w*.75,h*.63);ctx.lineTo(w*.57,h*.78);ctx.lineTo(w*.35,h*.86);ctx.lineTo(w*.18,h*.69);ctx.lineTo(w*.08,h*.44);ctx.closePath();ctx.fill();ctx.strokeStyle="#3c7892";ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(w*.48,h*.15);ctx.bezierCurveTo(w*.42,h*.30,w*.58,h*.38,w*.48,h*.52);ctx.bezierCurveTo(w*.40,h*.66,w*.48,h*.73,w*.57,h*.78);ctx.stroke();for(const s of game.settlements){if(s.population<=0)continue;const x=s.x*w,y=s.y*h,r=Math.min(11,4+s.population/18);ctx.fillStyle=s.countryId?"#c98e45":"#d6a94b";ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill()}for(const p of game.population){if(!p.alive)continue;ctx.fillStyle="#e8eef5";ctx.beginPath();ctx.arc(p.x*w,p.y*h,2.2,0,Math.PI*2);ctx.fill()}}
+function chooseButtons(id,cb){document.querySelectorAll(`#${id} button`).forEach(btn=>btn.addEventListener("click",()=>{document.querySelectorAll(`#${id} button`).forEach(b=>b.classList.remove("selected"));btn.classList.add("selected");cb(btn.dataset.value)}))}
+document.getElementById("populationInput").addEventListener("input",e=>document.getElementById("populationValue").textContent=e.target.value);chooseButtons("resourceChoices",v=>game.settings.resources=Number(v));chooseButtons("climateChoices",v=>game.settings.climate=v);
+document.getElementById("startButton").addEventListener("click",()=>{document.getElementById("introScreen").classList.add("hidden");document.getElementById("setupScreen").classList.remove("hidden")});document.getElementById("backToIntro").addEventListener("click",()=>{document.getElementById("setupScreen").classList.add("hidden");document.getElementById("introScreen").classList.remove("hidden")});document.getElementById("createWorldButton").addEventListener("click",()=>{game.worldName=document.getElementById("worldNameInput").value.trim()||"THẾ GIỚI #001";game.settings.population=Number(document.getElementById("populationInput").value);document.getElementById("setupScreen").classList.add("hidden");document.getElementById("gameScreen").classList.remove("hidden");createInitialWorld()});document.getElementById("pauseButton").addEventListener("click",togglePause);document.getElementById("mobilePause").addEventListener("click",togglePause);document.getElementById("clearEvents").addEventListener("click",()=>{game.events=[];updateUI()});resizeCanvas();
