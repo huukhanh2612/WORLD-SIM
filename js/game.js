@@ -2,12 +2,13 @@
  * WORLD-SIM — A living world simulation
  * Copyright © 2026 PHAN HỮU KHÁNH
  * All rights reserved.
- * V0.9 — Sống động hơn: địa hình thực tế, thời tiết động, làng có trưởng làng
- *        và lãnh thổ, làng chiến tranh dựng nước, tiến trình ngẫu nhiên hơn.
+ * V1.0 — Bản đồ ranh giới quốc gia thật, biểu tượng làng/quốc gia, sông biển
+ *        thiết kế lại, động vật hoang dã, chinh phạt có hậu quả (mất/di dời/
+ *        thuần phục), tăng trưởng quốc gia nhanh & ổn định hơn, thu phóng bản đồ.
  */
 
 const OWNER = "PHAN HỮU KHÁNH";
-const VERSION = "V0.9";
+const VERSION = "V1.0";
 
 const game = {
     year: 1,
@@ -17,6 +18,7 @@ const game = {
     countries: [],
     wars: [],
     events: [],
+    animals: [],
     terrain: { land: [], forests: [], mountains: [], lakes: [], rivers: [] },
     settings: { population: 100, resources: 1, climate: "temperate" },
     paused: true,
@@ -26,20 +28,30 @@ const game = {
     nextSettlement: 1,
     nextCountry: 1,
     nextWar: 1,
+    nextAnimal: 1,
+    totalBorn: 0,
+    totalDied: 0,
+    lastCountryYear: 0,
     weather: { type: "clear", years: 0 },
     selectedSettlement: null,
     dt: 0.04,
-    animClock: 0
+    animClock: 0,
+    view: { scale: 1, cx: .5, cy: .5 },
+    territoryGrid: null
 };
 
 const SETTLEMENT_NAMES = ["An Lạc","Bình Minh","Hòa Sơn","Thanh Hà","Phú An","Tân Lộc","Minh Châu","Vạn Phúc","Nam Sơn","Đông Hải","Trường An","Thiên Phúc","Đại Sơn","Thịnh Vượng","Hải Bình"];
-const COUNTRY_NAMES = ["Vương quốc An Lạc","Liên bang Bình Minh","Đế quốc Trường Sơn","Vương quốc Hải Nam","Đại Việt Sơn","Liên minh Minh Châu","Vương quốc Thanh Hà","Đế quốc Vạn Phúc"];
-const COLORS = ["#c95b55","#5b82c9","#d29a4c","#6eaa69","#9a68b8","#4f9c9c","#b86f92","#8c8750"];
+const COUNTRY_NAMES = ["Vương quốc An Lạc","Liên bang Bình Minh","Đế quốc Trường Sơn","Vương quốc Hải Nam","Đại Việt Sơn","Liên minh Minh Châu","Vương quốc Thanh Hà","Đế quốc Vạn Phúc","Vương triều Nam Phong","Liên bang Đông Sơn","Đế quốc Tây Vực","Vương quốc Bắc Hà"];
+const COLORS = ["#c95b55","#5b82c9","#d29a4c","#6eaa69","#9a68b8","#4f9c9c","#b86f92","#8c8750","#c98b5b","#5bb0c9","#9ac96e","#c95bb0"];
 const LEADER_FAMILY = ["Nguyễn","Trần","Lê","Phạm","Hoàng","Vũ","Đặng","Bùi","Đỗ","Ngô","Dương","Lý","Phan","Đinh"];
 const LEADER_GIVEN = ["An","Bình","Chiến","Dũng","Giang","Hải","Khánh","Lâm","Minh","Nam","Phong","Quang","Sơn","Thắng","Tuấn","Bảo","Cường","Đạt","Hùng","Kiên","Linh","Nga","Oanh","Thảo","Trang","Vy"];
 const VILLAGE_TITLES = ["Trưởng làng","Già làng","Tộc trưởng"];
 const COUNTRY_TITLES = ["Quốc vương","Nữ vương","Đại vương","Minh chủ"];
 const TECH_NAMES = ["Công cụ đá","Đồ đồng thô sơ","Rèn đồng tinh xảo","Vũ khí sắt","Kỹ thuật rèn thép"];
+const ANIMAL_TYPES = [
+    { emoji:"🦌", name:"Hươu" }, { emoji:"🐇", name:"Thỏ" }, { emoji:"🐗", name:"Lợn rừng" },
+    { emoji:"🐺", name:"Sói" }, { emoji:"🦊", name:"Cáo" }, { emoji:"🐻", name:"Gấu" }
+];
 const WEATHER_WEIGHTS = {
     dry:{clear:.55,cloudy:.25,rain:.07,storm:.06,fog:.07},
     temperate:{clear:.35,cloudy:.30,rain:.18,storm:.08,fog:.09},
@@ -83,6 +95,37 @@ class Person {
         this.settlement=null; this.country=null;
     }
 }
+
+/* ---------------------------- CAMERA / THU PHÓNG ---------------------------- */
+
+function toScreen(nx,ny,w,h){
+    const v=game.view;
+    return { x:(nx-v.cx)*v.scale*w + w/2, y:(ny-v.cy)*v.scale*h + h/2 };
+}
+function screenToWorld(px,py,w,h){
+    const v=game.view;
+    return { x: v.cx + (px-w/2)/(v.scale*w), y: v.cy + (py-h/2)/(v.scale*h) };
+}
+function clampView(w,h){
+    const v=game.view;
+    if(v.scale<=1){ v.scale=1; v.cx=.5; v.cy=.5; return; }
+    const halfX=0.5/v.scale, halfY=0.5/v.scale;
+    v.cx=clamp(v.cx,halfX,1-halfX);
+    v.cy=clamp(v.cy,halfY,1-halfY);
+}
+function zoomBy(factor, pivotPx, pivotPy){
+    if(!canvas) return;
+    const w=canvas.clientWidth,h=canvas.clientHeight;
+    const px = pivotPx==null? w/2 : pivotPx, py = pivotPy==null? h/2 : pivotPy;
+    const before=screenToWorld(px,py,w,h);
+    game.view.scale=clamp(game.view.scale*factor,1,8);
+    const after=screenToWorld(px,py,w,h);
+    game.view.cx += (before.x-after.x);
+    game.view.cy += (before.y-after.y);
+    clampView(w,h);
+    drawWorld();
+}
+function resetView(){ game.view.scale=1; game.view.cx=.5; game.view.cy=.5; drawWorld(); }
 
 /* ---------------------------- ĐỊA HÌNH ---------------------------- */
 
@@ -141,7 +184,131 @@ function ensureWeatherAssets(){
     }
 }
 
+function spawnAnimals(){
+    game.animals=[];
+    const count=ri(20,28);
+    for(let i=0;i<count;i++){
+        const q=randomLandPoint();
+        const t=pick(ANIMAL_TYPES);
+        game.animals.push({id:game.nextAnimal++, x:q.x, y:q.y, emoji:t.emoji, name:t.name, seed:rnd(0,Math.PI*2)});
+    }
+}
+
+/* ---------------------------- VÙNG LÃNH THỔ (BIÊN GIỚI QUỐC GIA THẬT) ---------------------------- */
+
+function computeTerritoryGrid(){
+    const W=64,H=40,t=game.terrain;
+    if(!game.territoryGrid || game.territoryGrid.length!==W*H) game.territoryGrid=new Int16Array(W*H);
+    const grid=game.territoryGrid;
+    const claimants=game.settlements.filter(s=>s.country!=null);
+    const maxDSq=0.30*0.30;
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+        const idx=y*W+x;
+        if(!t.land[idx] || !claimants.length){ grid[idx]=-1; continue; }
+        const nx=(x+.5)/W, ny=(y+.5)/H;
+        let best=null,bd=Infinity;
+        for(const s of claimants){
+            const dx=nx-s.x, dy=ny-s.y, d=dx*dx+dy*dy;
+            if(d<bd){ bd=d; best=s; }
+        }
+        grid[idx]=(best && bd<=maxDSq) ? best.country : -1;
+    }
+}
+
+function drawTerritory(w,h){
+    const W=64,H=40, grid=game.territoryGrid; if(!grid) return;
+    const cellW=(w/W)*game.view.scale+1.2, cellH=(h/H)*game.view.scale+1.2;
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+        const idx=y*W+x, cid=grid[idx]; if(cid<0) continue;
+        const c=getCountry(cid); if(!c) continue;
+        const p=toScreen((x+.5)/W,(y+.5)/H,w,h);
+        if(p.x<-cellW||p.x>w+cellW||p.y<-cellH||p.y>h+cellH) continue;
+        ctx.fillStyle=hexAlpha(c.color,.20);
+        ctx.fillRect(p.x-cellW/2,p.y-cellH/2,cellW,cellH);
+    }
+    ctx.lineWidth=Math.max(1.3,1.3*Math.min(game.view.scale,3));
+    ctx.lineJoin="round";
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+        const idx=y*W+x, cid=grid[idx];
+        if(x<W-1){
+            const rid=grid[idx+1];
+            if(rid!==cid && (cid>=0||rid>=0)){
+                const c=cid>=0?getCountry(cid):getCountry(rid);
+                ctx.strokeStyle=c?c.color:"rgba(255,255,255,.3)";
+                const p1=toScreen((x+1)/W,y/H,w,h), p2=toScreen((x+1)/W,(y+1)/H,w,h);
+                ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+            }
+        }
+        if(y<H-1){
+            const did=grid[idx+W];
+            if(did!==cid && (cid>=0||did>=0)){
+                const c=cid>=0?getCountry(cid):getCountry(did);
+                ctx.strokeStyle=c?c.color:"rgba(255,255,255,.3)";
+                const p1=toScreen(x/W,(y+1)/H,w,h), p2=toScreen((x+1)/W,(y+1)/H,w,h);
+                ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+            }
+        }
+    }
+}
+
 /* ---------------------------- VẼ THẾ GIỚI ---------------------------- */
+
+function cubicPoint(p0,c1,c2,p3,t){
+    const mt=1-t;
+    return {
+        x: mt*mt*mt*p0.x + 3*mt*mt*t*c1.x + 3*mt*t*t*c2.x + t*t*t*p3.x,
+        y: mt*mt*mt*p0.y + 3*mt*mt*t*c1.y + 3*mt*t*t*c2.y + t*t*t*p3.y
+    };
+}
+
+function drawOceanTexture(w,h){
+    ctx.save();
+    ctx.strokeStyle="rgba(255,255,255,.05)"; ctx.lineWidth=1;
+    for(let i=0;i<5;i++){
+        const yBase=h*(0.12+i*0.19);
+        ctx.beginPath();
+        for(let x=0;x<=w;x+=16){
+            const y=yBase+Math.sin(x*0.02+game.animClock*0.5+i*1.3)*4;
+            if(x===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+        }
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
+function drawRivers(w,h){
+    for(const r of game.terrain.rivers){
+        const p0={x:r.sx,y:r.sy}, c1={x:r.sx+.1,y:r.sy+.15}, c2={x:r.ex-.08,y:r.ey-.15}, p3={x:r.ex,y:r.ey};
+        const N=26, pts=[];
+        for(let i=0;i<=N;i++){
+            const t=i/N, pn=cubicPoint(p0,c1,c2,p3,t), sp=toScreen(pn.x,pn.y,w,h);
+            pts.push({x:sp.x,y:sp.y,t});
+        }
+        const baseW=2.1*game.view.scale;
+        const left=[],right=[];
+        for(let i=0;i<pts.length;i++){
+            const prev=pts[Math.max(0,i-1)], next=pts[Math.min(pts.length-1,i+1)];
+            const tx=next.x-prev.x, ty=next.y-prev.y, len=Math.hypot(tx,ty)||1;
+            const nx=-ty/len, ny=tx/len, width=baseW+pts[i].t*baseW*2.6;
+            left.push({x:pts[i].x+nx*width,y:pts[i].y+ny*width});
+            right.push({x:pts[i].x-nx*width,y:pts[i].y-ny*width});
+        }
+        ctx.beginPath(); ctx.moveTo(left[0].x,left[0].y);
+        for(const p of left) ctx.lineTo(p.x,p.y);
+        for(let i=right.length-1;i>=0;i--) ctx.lineTo(right[i].x,right[i].y);
+        ctx.closePath();
+        const grad=ctx.createLinearGradient(pts[0].x,pts[0].y,pts[pts.length-1].x,pts[pts.length-1].y);
+        grad.addColorStop(0,"#1f6a86"); grad.addColorStop(1,"#2c8fb0");
+        ctx.fillStyle=grad; ctx.fill();
+        ctx.strokeStyle="rgba(150,215,235,.35)"; ctx.lineWidth=Math.max(1,game.view.scale); ctx.stroke();
+        for(let i=0;i<pts.length-1;i++){
+            const a=0.12+0.28*Math.max(0,Math.sin(pts[i].t*10-game.animClock*1.6));
+            ctx.strokeStyle=`rgba(210,240,250,${a})`;
+            ctx.lineWidth=Math.max(1,1.3*game.view.scale);
+            ctx.beginPath(); ctx.moveTo(pts[i].x,pts[i].y); ctx.lineTo(pts[i+1].x,pts[i+1].y); ctx.stroke();
+        }
+    }
+}
 
 function drawWorld(){
     if(!canvas||!ctx||!canvas.clientWidth) return;
@@ -153,33 +320,36 @@ function drawWorld(){
     const ocean=ctx.createLinearGradient(0,0,0,h);
     ocean.addColorStop(0,"#1c5c82"); ocean.addColorStop(.6,"#164968"); ocean.addColorStop(1,"#071b2c");
     ctx.fillStyle=ocean; ctx.fillRect(0,0,w,h);
+    drawOceanTexture(w,h);
 
     const W=64,H=40;
     const base=game.settings.climate==="dry"?[122,113,72]:game.settings.climate==="wet"?[62,107,71]:[79,114,68];
+    const cw=(w/W)*game.view.scale+1.2, ch=(h/H)*game.view.scale+1.2;
     for(let y=0;y<H;y++) for(let x=0;x<W;x++) if(game.terrain.land[y*W+x]){
-        const px=x*w/W,py=y*h/H;
+        const p=toScreen((x+.5)/W,(y+.5)/H,w,h);
+        if(p.x<-cw||p.x>w+cw||p.y<-ch||p.y>h+ch) continue;
         const n=Math.sin(x*12.9898+y*78.233)*43758.5453; const noise=(n-Math.floor(n))*14-7;
         ctx.fillStyle=`rgb(${clamp(base[0]+noise,0,255)|0},${clamp(base[1]+noise,0,255)|0},${clamp(base[2]+noise,0,255)|0})`;
-        ctx.fillRect(px,py,w/W+1,h/H+1);
+        ctx.fillRect(p.x-cw/2,p.y-ch/2,cw,ch);
     }
 
-    // Rừng cây — vị trí cây cố định từ lúc tạo địa hình để không "nhảy" mỗi khung hình
     for(const f of game.terrain.forests){
         if(!game.isLand(f.x,f.y)) continue;
         for(const p of f.positions){
             const tx=f.x+p.ox, ty=f.y+p.oy;
             if(!game.isLand(tx,ty)) continue;
-            const x=tx*w,y=ty*h;
-            ctx.fillStyle="rgba(5,15,10,.25)"; ctx.beginPath(); ctx.ellipse(x,y+2.4,3.1,1.4,0,0,Math.PI*2); ctx.fill();
-            ctx.fillStyle=p.tone>.5?"#173d26":"#1d4a2d"; ctx.beginPath(); ctx.arc(x,y,3,0,Math.PI*2); ctx.fill();
-            ctx.fillStyle=p.tone>.5?"#3f7548":"#4d8a54"; ctx.beginPath(); ctx.arc(x-1,y-2,2.2,0,Math.PI*2); ctx.fill();
+            const sp=toScreen(tx,ty,w,h);
+            const x=sp.x,y=sp.y, sc=clamp(game.view.scale,1,3);
+            ctx.fillStyle="rgba(5,15,10,.25)"; ctx.beginPath(); ctx.ellipse(x,y+2.4*sc,3.1*sc,1.4*sc,0,0,Math.PI*2); ctx.fill();
+            ctx.fillStyle=p.tone>.5?"#173d26":"#1d4a2d"; ctx.beginPath(); ctx.arc(x,y,3*sc,0,Math.PI*2); ctx.fill();
+            ctx.fillStyle=p.tone>.5?"#3f7548":"#4d8a54"; ctx.beginPath(); ctx.arc(x-1*sc,y-2*sc,2.2*sc,0,Math.PI*2); ctx.fill();
         }
     }
 
-    // Núi — đổ bóng và tuyết đỉnh
     for(const m of game.terrain.mountains){
         if(!game.isLand(m.x,m.y)) continue;
-        const x=m.x*w,y=m.y*h,s=m.r*Math.min(w,h);
+        const sp=toScreen(m.x,m.y,w,h);
+        const x=sp.x,y=sp.y,s=m.r*Math.min(w,h)*game.view.scale;
         const grad=ctx.createLinearGradient(x-s,y-s,x+s,y+s*.65);
         grad.addColorStop(0,"#7a8479"); grad.addColorStop(.55,"#5b655f"); grad.addColorStop(1,"#3c443f");
         ctx.fillStyle=grad; ctx.beginPath(); ctx.moveTo(x,y-s); ctx.lineTo(x-s,y+s*.65); ctx.lineTo(x+s,y+s*.65); ctx.closePath(); ctx.fill();
@@ -190,73 +360,76 @@ function drawWorld(){
     ctx.fillStyle="#276f8c";
     for(const l of game.terrain.lakes){
         if(!game.isLand(l.x,l.y)) continue;
-        ctx.beginPath(); ctx.ellipse(l.x*w,l.y*h,l.r*w,l.r*h,0,0,Math.PI*2); ctx.fill();
+        const sp=toScreen(l.x,l.y,w,h);
+        ctx.beginPath(); ctx.ellipse(sp.x,sp.y,l.r*w*game.view.scale,l.r*h*game.view.scale,0,0,Math.PI*2); ctx.fill();
         ctx.strokeStyle="rgba(180,225,240,.35)"; ctx.lineWidth=1; ctx.stroke();
     }
 
-    // Sông — có ánh nước và hiệu ứng chảy nhẹ
     game.animClock=(game.animClock||0)+dt;
-    for(const r of game.terrain.rivers){
-        ctx.strokeStyle="#1f5f78"; ctx.lineWidth=4; ctx.beginPath();
-        ctx.moveTo(r.sx*w,r.sy*h); ctx.bezierCurveTo((r.sx+.1)*w,(r.sy+.15)*h,(r.ex-.08)*w,(r.ey-.15)*h,r.ex*w,r.ey*h); ctx.stroke();
-        ctx.strokeStyle="#6bbbd6"; ctx.lineWidth=2; ctx.setLineDash([10,6]); ctx.lineDashOffset=-game.animClock*14;
-        ctx.beginPath(); ctx.moveTo(r.sx*w,r.sy*h); ctx.bezierCurveTo((r.sx+.1)*w,(r.sy+.15)*h,(r.ex-.08)*w,(r.ey-.15)*h,r.ex*w,r.ey*h); ctx.stroke();
-        ctx.setLineDash([]);
-    }
-
-    // Vùng ảnh hưởng quốc gia
-    for(const c of game.countries){
-        ctx.globalAlpha=.16; ctx.fillStyle=c.color;
-        for(const s of game.settlements.filter(s=>s.country===c.id)){ ctx.beginPath(); ctx.arc(s.x*w,s.y*h,Math.min(w,h)*.07,0,Math.PI*2); ctx.fill(); }
-        ctx.globalAlpha=1;
-    }
+    drawRivers(w,h);
+    drawTerritory(w,h);
 
     for(const war of game.wars){
         const a=getCountry(war.a),b=getCountry(war.b); if(!a||!b) continue;
         const sa=game.settlements.filter(s=>s.country===a.id), sb=game.settlements.filter(s=>s.country===b.id); if(!sa.length||!sb.length) continue;
         let A=sa[0],B=sb[0],best=999;
         for(const x of sa) for(const y of sb){ const d=dist(x,y); if(d<best){best=d;A=x;B=y;} }
+        const pa=toScreen(A.x,A.y,w,h), pb=toScreen(B.x,B.y,w,h);
         ctx.strokeStyle="#ff4949"; ctx.lineWidth=4; ctx.setLineDash([9,6]); ctx.lineDashOffset=-game.animClock*20;
-        ctx.beginPath(); ctx.moveTo(A.x*w,A.y*h); ctx.lineTo(B.x*w,B.y*h); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(pa.x,pa.y); ctx.lineTo(pb.x,pb.y); ctx.stroke(); ctx.setLineDash([]);
     }
 
-    // Làng mạc — lãnh thổ, quy mô theo dân số, thủ đô có cờ
+    // Động vật hoang dã
+    const animalScale=clamp(game.view.scale,1,2.2);
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    for(const an of game.animals){
+        const t=game.animClock*0.15+an.seed;
+        const wx=an.x+Math.sin(t)*0.012, wy=an.y+Math.cos(t*.8)*0.009;
+        if(!game.isLand(wx,wy)) continue;
+        const sp=toScreen(wx,wy,w,h);
+        if(sp.x<-20||sp.x>w+20||sp.y<-20||sp.y>h+20) continue;
+        ctx.font=`${Math.round(11*animalScale)}px serif`;
+        ctx.fillText(an.emoji, sp.x, sp.y);
+    }
+
+    // Làng mạc — biểu tượng theo quy mô, không còn chấm tròn đơn thuần
+    const iconScale=clamp(game.view.scale,1,2.4);
     for(const s of game.settlements){
-        const c=getCountry(s.country), x=s.x*w, y=s.y*h;
-        const R=clamp(3+s.population/16,4,11);
-        if(s.population>=12){
-            ctx.setLineDash([4,4]); ctx.lineWidth=1;
-            ctx.strokeStyle=c?hexAlpha(c.color,.4):"rgba(224,198,111,.35)";
-            ctx.beginPath(); ctx.arc(x,y,(s.territory||.045)*Math.min(w,h),0,Math.PI*2); ctx.stroke();
-            ctx.setLineDash([]);
-        }
-        ctx.fillStyle=c?c.color:"#e0c66f"; ctx.beginPath(); ctx.arc(x,y,R,0,Math.PI*2); ctx.fill();
+        const c=getCountry(s.country);
+        const sp=toScreen(s.x,s.y,w,h);
+        const x=sp.x,y=sp.y;
+        const R=clamp(3+s.population/16,4,11)*Math.min(iconScale,2);
+        ctx.fillStyle=c?c.color:"#7c6a3f";
+        ctx.beginPath(); ctx.arc(x,y,R,0,Math.PI*2); ctx.fill();
         ctx.strokeStyle="#fff2c8"; ctx.lineWidth=1; ctx.stroke();
-        if(s.population>=15){ ctx.fillStyle="#f0e6c8"; ctx.fillRect(x-2,y-R-9,4,9); ctx.fillRect(x-6,y-R-5,12,2); }
-        if(s.population>=40){ ctx.fillStyle="#d8cba0"; ctx.fillRect(x-9,y-R-6,4,6); ctx.fillRect(x+5,y-R-6,4,6); }
-        if(c && c.capital===s.id){
-            ctx.strokeStyle=c.color; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(x,y-R-14); ctx.lineTo(x,y-R-2); ctx.stroke();
-            ctx.fillStyle=c.color; ctx.beginPath(); ctx.moveTo(x,y-R-14); ctx.lineTo(x+9,y-R-11); ctx.lineTo(x,y-R-8); ctx.closePath(); ctx.fill();
-        }
+        const isCapital=c && c.capital===s.id;
+        const glyph = isCapital ? "🏰" : s.population>=40 ? "🏯" : s.population>=15 ? "🏘️" : "🛖";
+        ctx.font=`${Math.round(R*1.7)}px serif`;
+        ctx.textAlign="center"; ctx.textBaseline="middle";
+        ctx.fillText(glyph, x, y - R*0.05);
         if(game.selectedSettlement===s.id){
-            ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(x,y,R+4,0,Math.PI*2); ctx.stroke();
+            ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(x,y,R+5,0,Math.PI*2); ctx.stroke();
         }
     }
 
-    // Dân làng — hình người nhỏ thay vì chấm đơn thuần
+    // Dân làng — hình người nhỏ
     const people=alive();
     const step=people.length>600?Math.ceil(people.length/600):1;
     for(let i=0;i<people.length;i+=step){
-        const p=people[i], x=p.x*w, y=p.y*h, c=p.country?getCountry(p.country):null;
+        const p=people[i], c=p.country?getCountry(p.country):null;
+        const sp=toScreen(p.x,p.y,w,h);
+        if(sp.x<-6||sp.x>w+6||sp.y<-6||sp.y>h+6) continue;
         ctx.fillStyle=c?c.color:"#f4ead0";
-        ctx.beginPath(); ctx.arc(x,y-1,1.3,0,Math.PI*2); ctx.fill();
-        ctx.fillRect(x-.6,y,1.2,2.4);
+        ctx.beginPath(); ctx.arc(sp.x,sp.y-1,1.3,0,Math.PI*2); ctx.fill();
+        ctx.fillRect(sp.x-.6,sp.y,1.2,2.4);
     }
 
     ctx.textAlign="center"; ctx.font="11px Arial";
     for(const s of game.settlements.filter(s=>s.population>=18)){
-        ctx.fillStyle="#fff"; ctx.shadowColor="#000"; ctx.shadowBlur=4; ctx.fillText(s.name,s.x*w,s.y*h-14); ctx.shadowBlur=0;
-        const c=getCountry(s.country); if(c&&c.capital===s.id){ ctx.font="bold 12px Arial"; ctx.fillStyle=c.color; ctx.fillText(c.name,s.x*w,s.y*h+19); ctx.font="11px Arial"; }
+        const sp=toScreen(s.x,s.y,w,h);
+        if(sp.x<-40||sp.x>w+40||sp.y<-20||sp.y>h+20) continue;
+        ctx.fillStyle="#fff"; ctx.shadowColor="#000"; ctx.shadowBlur=4; ctx.fillText(s.name,sp.x,sp.y-16); ctx.shadowBlur=0;
+        const c=getCountry(s.country); if(c&&c.capital===s.id){ ctx.font="bold 12px Arial"; ctx.fillStyle=c.color; ctx.fillText(c.name,sp.x,sp.y+20); ctx.font="11px Arial"; }
     }
 
     drawClouds(w,h,dt);
@@ -320,21 +493,25 @@ function randomLandPoint(){
 function createWorld(){
     stop();
     game.year=1; game.population=[]; game.settlements=[]; game.countries=[]; game.wars=[]; game.events=[]; game.generation=1;
-    game.nextPerson=1; game.nextSettlement=1; game.nextCountry=1; game.nextWar=1;
+    game.nextPerson=1; game.nextSettlement=1; game.nextCountry=1; game.nextWar=1; game.nextAnimal=1;
+    game.totalBorn=0; game.totalDied=0; game.lastCountryYear=0;
     game.selectedSettlement=null; game.animClock=0;
+    game.view={scale:1,cx:.5,cy:.5};
     game.weather={type:"clear",years:0}; game.clouds=[]; game.rainDrops=[];
-    game.settlementTarget=ri(3,7);
     game.firstCountryYear=ri(55,100);
     game.secondCountryYear=ri(115,175);
-    game.expansionYear=ri(190,260);
-    game.warEligibleYear=ri(130,190);
-    game.majorWarYear=ri(210,275);
+    game.expansionYear=ri(150,210);
+    game.warEligibleYear=ri(110,160);
+    game.majorWarYear=ri(190,240);
     createTerrain();
     ensureWeatherAssets();
+    spawnAnimals();
     for(let i=0;i<game.settings.population;i++){ const p=randomLandPoint(); game.population.push(new Person(game.nextPerson++,p.x,p.y)); }
+    game.totalBorn=game.settings.population;
+    computeTerritoryGrid();
     addEvent(`Thế giới ${game.worldName} được hình thành.`,true);
     addEvent(`${game.settings.population} con người đầu tiên xuất hiện. Không có quốc gia nào tồn tại.`,true);
-    addEvent("Thiên nhiên đã có trước nền văn minh: biển, đồng bằng, rừng, núi, hồ và sông.");
+    addEvent("Thiên nhiên đã có trước nền văn minh: biển, đồng bằng, rừng, núi, hồ, sông và muông thú.");
     closeSettlementModal();
     update(); resizeCanvas(); drawWorld(); start();
 }
@@ -365,6 +542,7 @@ function simulateYear(){
     formCountries();
     simulateWars();
     generateHistory();
+    computeTerritoryGrid();
 }
 
 function simulateWeather(){
@@ -379,7 +557,7 @@ function simulateWeather(){
         if(target && target.population>4){
             const loss=Math.max(1,Math.floor(target.population*rnd(.05,.15)));
             let removed=0;
-            for(const p of alive()){ if(p.settlement===target.id && removed<loss && Math.random()<.5){ p.alive=false; removed++; } }
+            for(const p of alive()){ if(p.settlement===target.id && removed<loss && Math.random()<.5){ p.alive=false; game.totalDied++; removed++; } }
             if(removed>0) addEvent(`🌩️ Bão lớn tàn phá ${target.name}, ${removed} người thiệt mạng.`,true);
         }
     }
@@ -403,13 +581,13 @@ function simulatePeople(){
         if(p.age>95) death=.45;
         if(p.health<15) death+=.004;
         if(food<.7) death+=.003;
-        if(Math.random()<death) p.alive=false;
+        if(Math.random()<death){ p.alive=false; game.totalDied++; }
     }
     const adults=alive().filter(p=>p.age>=18&&p.age<=40);
     for(const p of adults){
         if(Math.random()<.022*food){
             const b=new Person(game.nextPerson++,clamp(p.x+rnd(-.012,.012),.02,.98),clamp(p.y+rnd(-.012,.012),.02,.98),0);
-            b.settlement=p.settlement; b.country=p.country; game.population.push(b);
+            b.settlement=p.settlement; b.country=p.country; game.population.push(b); game.totalBorn++;
         }
     }
     for(const p of alive()){
@@ -420,9 +598,12 @@ function simulatePeople(){
     }
     if(game.year<600 && alive().length<Math.max(20,game.settings.population*.25)){
         const target=Math.max(30,Math.floor(game.settings.population*.55));
-        for(let i=alive().length;i<target;i++){ const q=randomLandPoint(); game.population.push(new Person(game.nextPerson++,q.x,q.y,ri(18,35))); }
+        for(let i=alive().length;i<target;i++){ const q=randomLandPoint(); game.population.push(new Person(game.nextPerson++,q.x,q.y,ri(18,35))); game.totalBorn++; }
         addEvent("Một làn sóng người di cư và tái định cư giúp các cộng đồng tránh sụp đổ dân số.",true);
     }
+    // Dọn danh sách người đã mất để "Đang sống" và bộ nhớ không phình to vô hạn.
+    // "Tổng từng ghi nhận" (totalBorn) vẫn lưu lại lịch sử đầy đủ riêng biệt.
+    game.population = game.population.filter(p=>p.alive);
 }
 
 function makeSettlement(base){
@@ -434,9 +615,13 @@ function makeSettlement(base){
     };
 }
 
+function currentSettlementTarget(){
+    return clamp(4 + Math.floor(game.year/28) + Math.floor(alive().length/45), 4, 40);
+}
+
 function simulateSettlements(){
     for(const s of game.settlements) s.population=alive().filter(p=>p.settlement===s.id).length;
-    if(game.year>=6 && game.settlements.length<(game.settlementTarget||5) && Math.random()<0.1+game.year*0.0012){
+    if(game.year>=6 && game.settlements.length<currentSettlementTarget() && Math.random()<0.14+game.year*0.0015){
         const base=pick(alive());
         if(base){
             const s=makeSettlement(base);
@@ -492,7 +677,7 @@ function simulateRaids(){
 
 function formCountries(){
     if(game.settlements.length<2) return;
-    const eligible=game.settlements.filter(s=>!s.country&&s.population>=15&&s.age>=8);
+    const eligible=game.settlements.filter(s=>!s.country&&s.population>=13&&s.age>=8);
     if(game.countries.length===0 && game.year>=game.firstCountryYear && eligible.length){
         const s=eligible.sort((a,b)=>b.population-a.population)[0]; createCountry(s);
     }
@@ -500,11 +685,15 @@ function formCountries(){
         const farthest=eligible.slice().sort((a,b)=>{ const ca=game.countries[0].settlements.map(getSettlement); return Math.min(...ca.map(c=>dist(b,c)))-Math.min(...ca.map(c=>dist(a,c))); })[0];
         createCountry(farthest||eligible[0]);
     }
-    if(game.countries.length<6 && game.year>=game.expansionYear){
+    if(game.countries.length<14 && game.year>=game.expansionYear){
         for(const s of eligible){
-            if(game.countries.length>=6) break;
-            if(Math.random()<.03+Math.random()*.02) createCountry(s);
+            if(game.countries.length>=14) break;
+            if(Math.random()<.05+Math.random()*.05) createCountry(s);
         }
+    }
+    // Đảm bảo lịch sử không "đóng băng" ở 1-2 quốc gia hàng trăm năm
+    if(game.countries.length>=1 && game.countries.length<14 && (game.year-game.lastCountryYear)>130 && eligible.length){
+        createCountry(eligible[0]);
     }
     for(const c of game.countries){
         c.population=game.settlements.filter(s=>s.country===c.id).reduce((n,s)=>n+s.population,0);
@@ -526,10 +715,53 @@ function createCountry(s){
     const c={ id:game.nextCountry++, name:uniqueName(COUNTRY_NAMES), settlements:[s.id], population:s.population,
         power:s.population*.8, wealth:50, color:COLORS[(game.nextCountry-2)%COLORS.length],
         leader:{name:leaderName,title:pick(COUNTRY_TITLES)}, founded:game.year, capital:s.id };
-    game.countries.push(c); s.country=c.id;
+    game.countries.push(c); s.country=c.id; game.lastCountryYear=game.year;
     if(s.leader) s.leader.title=`Thị trưởng ${s.name}`;
     for(const p of alive()) if(p.settlement===s.id) p.country=c.id;
     addEvent(`🏰 ${c.leader.title} ${c.leader.name} lập nên ${c.name} từ ${s.name}. Một triều đại mới bắt đầu.`,true);
+}
+
+function resolveConquest(winner, loser, target){
+    if(!target) return;
+    loser.settlements=loser.settlements.filter(id=>id!==target.id);
+    const roll=Math.random();
+    const pop=target.population;
+    if(roll<.4){
+        // Thuần phục: làng vẫn tồn tại nhưng đổi chủ, trở thành chư hầu
+        target.country=winner.id; winner.settlements.push(target.id);
+        const fled=Math.floor(pop*rnd(.05,.2));
+        let removed=0;
+        for(const p of alive()){ if(p.settlement===target.id && removed<fled && Math.random()<.5){ p.settlement=null; p.country=null; removed++; } }
+        for(const p of alive()) if(p.settlement===target.id) p.country=winner.id;
+        target.leader={name:randomLeaderName(),title:"Thị trưởng thần phục"};
+        addEvent(`🏳️ ${target.name} bị ${winner.name} chinh phục và thuần phục, trở thành chư hầu.`,true);
+    } else if(roll<.7){
+        // Di dời: cư dân chạy về làng gần nhất của phe thua, làng cũ biến mất khỏi bản đồ
+        const others=loser.settlements.map(getSettlement).filter(x=>x && x.id!==target.id);
+        const dest=others.sort((x,y)=>dist(x,target)-dist(y,target))[0];
+        if(dest){
+            let moved=0;
+            for(const p of alive()) if(p.settlement===target.id){ p.settlement=dest.id; p.country=dest.country; moved++; }
+            addEvent(`🚶 ${target.name} bị ${winner.name} đánh chiếm, ${moved} cư dân di dời về ${dest.name}.`,true);
+        } else {
+            for(const p of alive()) if(p.settlement===target.id){ p.settlement=null; p.country=null; }
+            addEvent(`🚶 ${target.name} thất thủ, cư dân ly tán khắp nơi tìm nơi trú ẩn mới.`,true);
+        }
+        game.settlements=game.settlements.filter(x=>x.id!==target.id);
+    } else {
+        // Xóa sổ: làng bị tàn phá hoàn toàn
+        let killed=0;
+        for(const p of alive()) if(p.settlement===target.id && Math.random()<.6){ p.alive=false; game.totalDied++; killed++; }
+        for(const p of alive()) if(p.settlement===target.id){ p.settlement=null; p.country=null; }
+        game.settlements=game.settlements.filter(x=>x.id!==target.id);
+        addEvent(`💀 ${target.name} bị ${winner.name} tàn phá hoàn toàn, ${killed} người thiệt mạng trong cuộc chinh phạt.`,true);
+    }
+    if(loser.capital===target.id) loser.capital=loser.settlements[0]||null;
+    if(loser.settlements.length===0){
+        addEvent(`🏴 ${loser.name} sụp đổ hoàn toàn sau thất bại trước ${winner.name}.`,true);
+        for(const p of alive()) if(p.country===loser.id) p.country=null;
+        game.countries=game.countries.filter(c=>c.id!==loser.id);
+    }
 }
 
 function simulateWars(){
@@ -549,7 +781,7 @@ function simulateWars(){
         if(a&&b){ game.wars.push({id:game.nextWar++,a:a.id,b:b.id,age:0,score:0}); addEvent(`⚔️ ${a.name} và ${b.name} bước vào cuộc chiến lớn đầu tiên của lịch sử.`,true); }
     }
     for(const w of [...game.wars]){
-        const a=getCountry(w.a),b=getCountry(w.b); if(!a||!b) continue;
+        const a=getCountry(w.a),b=getCountry(w.b); if(!a||!b){ game.wars=game.wars.filter(x=>x.id!==w.id); continue; }
         w.age++;
         const result=a.power-b.power+rnd(-25,25); w.score+=result>0?1:-1;
         if(Math.random()<.55){
@@ -561,8 +793,9 @@ function simulateWars(){
         if(w.age>=warLimit||Math.abs(w.score)>=6){
             const winner=w.score>=0?a:b,loser=winner===a?b:a;
             const target=loser.settlements.map(getSettlement).find(Boolean);
-            if(target&&Math.random()<.7){ target.country=winner.id; winner.settlements.push(target.id); loser.settlements=loser.settlements.filter(id=>id!==target.id); for(const p of alive()) if(p.settlement===target.id) p.country=winner.id; addEvent(`🏳️ ${winner.name} chiếm ${target.name} sau chiến tranh.`,true); }
-            addEvent(`🕊️ Chiến tranh giữa ${a.name} và ${b.name} kết thúc. ${winner.name} là bên thắng thế.`,true);
+            if(target&&Math.random()<.75) resolveConquest(winner,loser,target);
+            const stillExists=getCountry(loser.id);
+            if(stillExists) addEvent(`🕊️ Chiến tranh giữa ${a.name} và ${b.name} kết thúc. ${winner.name} là bên thắng thế.`,true);
             game.wars=game.wars.filter(x=>x.id!==w.id);
         }
     }
@@ -579,7 +812,7 @@ function generateHistory(){
 function setText(id,value){ const e=document.getElementById(id); if(e) e.textContent=typeof value==="number"?fmt(value):value; }
 function update(){
     const a=alive();
-    setText("year",game.year); setText("worldName",game.worldName); setText("population",game.population.length);
+    setText("year",game.year); setText("worldName",game.worldName); setText("population",game.totalBorn);
     setText("alive",a.length); setText("settlements",game.settlements.length); setText("countries",game.countries.length); setText("generation",game.generation);
     setText("resourceState",game.settings.resources<1?"Khan hiếm":game.settings.resources>1?"Dồi dào":"Cân bằng");
     setText("climateState",game.settings.climate==="dry"?"Khô":game.settings.climate==="wet"?"Ẩm":"Ôn hòa");
@@ -623,10 +856,76 @@ function handleCanvasClick(e){
     if(!canvas || !canvas.clientWidth) return;
     const rect=canvas.getBoundingClientRect();
     const w=rect.width,h=rect.height;
-    const mx=(e.clientX-rect.left)/w, my=(e.clientY-rect.top)/h;
-    let bestS=null, bd=Math.max(.028,14/Math.min(w,h));
-    for(const s of game.settlements){ const d=dist(s,{x:mx,y:my}); if(d<bd){ bd=d; bestS=s; } }
+    const px=e.clientX-rect.left, py=e.clientY-rect.top;
+    const world=screenToWorld(px,py,w,h);
+    let bestS=null, bd=Math.max(.028,14/Math.min(w,h))/game.view.scale;
+    for(const s of game.settlements){ const d=dist(s,world); if(d<bd){ bd=d; bestS=s; } }
     if(bestS) openSettlementModal(bestS);
+}
+
+let dragState=null;
+function setupCameraControls(){
+    if(!canvas) return;
+    canvas.addEventListener("wheel",e=>{
+        e.preventDefault();
+        const rect=canvas.getBoundingClientRect();
+        const px=e.clientX-rect.left, py=e.clientY-rect.top;
+        zoomBy(e.deltaY<0?1.16:1/1.16, px, py);
+    },{passive:false});
+    canvas.addEventListener("mousedown",e=>{
+        dragState={startX:e.clientX,startY:e.clientY,moved:false,cx0:game.view.cx,cy0:game.view.cy,rect:canvas.getBoundingClientRect()};
+        canvas.style.cursor="grabbing";
+    });
+    window.addEventListener("mousemove",e=>{
+        if(!dragState) return;
+        const dx=e.clientX-dragState.startX, dy=e.clientY-dragState.startY;
+        if(Math.hypot(dx,dy)>4) dragState.moved=true;
+        if(dragState.moved){
+            const rect=dragState.rect;
+            game.view.cx=dragState.cx0-dx/(game.view.scale*rect.width);
+            game.view.cy=dragState.cy0-dy/(game.view.scale*rect.height);
+            clampView(rect.width,rect.height);
+            drawWorld();
+        }
+    });
+    window.addEventListener("mouseup",e=>{
+        if(dragState && !dragState.moved) handleCanvasClick(e);
+        dragState=null;
+        if(canvas) canvas.style.cursor="pointer";
+    });
+    let lastTouchDist=null, lastTouchMid=null;
+    canvas.addEventListener("touchstart",e=>{
+        if(e.touches.length===1){
+            const t=e.touches[0];
+            dragState={startX:t.clientX,startY:t.clientY,moved:false,cx0:game.view.cx,cy0:game.view.cy,rect:canvas.getBoundingClientRect()};
+        } else if(e.touches.length===2){
+            lastTouchDist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+            lastTouchMid={x:(e.touches[0].clientX+e.touches[1].clientX)/2,y:(e.touches[0].clientY+e.touches[1].clientY)/2};
+        }
+    },{passive:true});
+    canvas.addEventListener("touchmove",e=>{
+        if(e.touches.length===1 && dragState){
+            const t=e.touches[0];
+            const dx=t.clientX-dragState.startX, dy=t.clientY-dragState.startY;
+            if(Math.hypot(dx,dy)>4) dragState.moved=true;
+            const rect=dragState.rect;
+            game.view.cx=dragState.cx0-dx/(game.view.scale*rect.width);
+            game.view.cy=dragState.cy0-dy/(game.view.scale*rect.height);
+            clampView(rect.width,rect.height);
+            drawWorld();
+        } else if(e.touches.length===2 && lastTouchDist){
+            e.preventDefault();
+            const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+            const rect=canvas.getBoundingClientRect();
+            const mx=lastTouchMid.x-rect.left, my=lastTouchMid.y-rect.top;
+            zoomBy(d/lastTouchDist, mx, my);
+            lastTouchDist=d;
+        }
+    },{passive:false});
+    canvas.addEventListener("touchend",e=>{
+        if(dragState && !dragState.moved && e.changedTouches && e.changedTouches[0]) handleCanvasClick(e.changedTouches[0]);
+        dragState=null; lastTouchDist=null;
+    });
 }
 
 function setup(){
@@ -648,7 +947,10 @@ function setup(){
     document.getElementById("clearEvents")?.addEventListener("click",()=>{ game.events=[]; update(); });
     document.getElementById("closeSettlementModal")?.addEventListener("click",closeSettlementModal);
     document.getElementById("settlementModal")?.addEventListener("click",(e)=>{ if(e.target.id==="settlementModal") closeSettlementModal(); });
-    canvas?.addEventListener("click",handleCanvasClick);
+    document.getElementById("zoomIn")?.addEventListener("click",()=>zoomBy(1.3));
+    document.getElementById("zoomOut")?.addEventListener("click",()=>zoomBy(1/1.3));
+    document.getElementById("zoomReset")?.addEventListener("click",resetView);
+    setupCameraControls();
     window.addEventListener("resize",resizeCanvas);
     document.addEventListener("keydown",e=>{ if(e.code==="Space"&&!e.target.matches("input,button")){ e.preventDefault(); if(!game.timer) return; togglePause(); } if(e.code==="Escape") closeSettlementModal(); });
 }
@@ -657,7 +959,7 @@ function setup(){
 let lastFrame=0;
 function frameLoop(ts){
     requestAnimationFrame(frameLoop);
-    if(ts-lastFrame<66) return; // ~15fps — đủ mượt cho mây/mưa, nhẹ CPU
+    if(ts-lastFrame<66) return; // ~15fps — đủ mượt cho mây/mưa/sông, nhẹ CPU
     game.dt=lastFrame?Math.min(.2,(ts-lastFrame)/1000):0.05;
     lastFrame=ts;
     drawWorld();
