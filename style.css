@@ -14,6 +14,7 @@
 .modal-stat span{color:#8398ad;flex-shrink:0}
 .modal-stat strong{color:#f5f8fb;text-align:right;font-weight:bold}
 .modal-stat:last-child{border-bottom:0}
+.modal-court-title{margin:14px 0 4px;font-size:10px;letter-spacing:2px;color:#71869d;border-top:1px solid #1c2b3d;padding-top:12px}
 @media(max-width:700px){.settlement-modal-card{padding:22px 18px 16px}}
 
 /* ---- Thu phóng bản đồ (V1.0) ---- */
