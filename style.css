@@ -15,3 +15,10 @@
 .modal-stat strong{color:#f5f8fb;text-align:right;font-weight:bold}
 .modal-stat:last-child{border-bottom:0}
 @media(max-width:700px){.settlement-modal-card{padding:22px 18px 16px}}
+
+/* ---- Thu phóng bản đồ (V1.0) ---- */
+#worldCanvas{cursor:grab;touch-action:none}
+.zoom-controls{position:absolute;top:16px;right:16px;display:flex;flex-direction:column;gap:6px;z-index:5}
+.zoom-controls button{width:34px;height:34px;padding:0;border-radius:6px;font-size:16px;line-height:1;background:rgba(9,19,33,.75);border:1px solid rgba(255,255,255,.12);color:#e7eef6}
+.zoom-controls button:hover{background:rgba(28,51,78,.9);border-color:#6e8eae}
+@media(max-width:700px){.zoom-controls{top:auto;bottom:52px;right:10px}.zoom-controls button{width:30px;height:30px;font-size:14px}}
