@@ -16,7 +16,7 @@ const game = {
     timer: null, generation: 1, nextPerson: 1, nextSettlement: 1, nextCountry: 1, nextWar: 1,
     weather: { type: "clear", years: 0 }, selectedSettlement: null, dt: 0.04, animClock: 0,
     // Chu kỳ ngày & đêm (V4.0) — thời gian trôi chậm, mỗi năm có nhiều ngày/đêm
-    dayClock: 0, dayCycleLength: 9, isDaytime: true,
+    dayClock: 0, dayCycleLength: 60, dayFraction: 0.64, isDaytime: true,
     // Thu phóng bản đồ (V4.0)
     view: { zoom: 1, ox: 0, oy: 0 },
     scarcityRatio: 1
@@ -469,13 +469,15 @@ function drawWorld(){
 
 function drawDayNightOverlay(w,h){
     // Độ tối ban đêm biến thiên mượt theo vị trí trong chu kỳ ngày/đêm
-    const half=game.dayCycleLength/2;
-    const cyclePos=(game.dayClock||0)%game.dayCycleLength;
+    const cycleLen=game.dayCycleLength||60;
+    const daySplit=cycleLen*(game.dayFraction||0.64);
+    const nightLen=cycleLen-daySplit;
+    const cyclePos=(game.dayClock||0)%cycleLen;
     let darkness=0;
-    const fade=half*0.22;
-    if(cyclePos>=half-fade && cyclePos<half+fade){ darkness=(cyclePos-(half-fade))/(fade*2); } // hoàng hôn
-    else if(cyclePos>=half+fade && cyclePos<game.dayCycleLength-fade){ darkness=1; } // đêm sâu
-    else if(cyclePos>=game.dayCycleLength-fade){ darkness=1-((cyclePos-(game.dayCycleLength-fade))/(fade*2)); } // bình minh
+    const fade=Math.min(daySplit,nightLen)*0.28;
+    if(cyclePos>=daySplit-fade && cyclePos<daySplit+fade){ darkness=(cyclePos-(daySplit-fade))/(fade*2); } // hoàng hôn
+    else if(cyclePos>=daySplit+fade && cyclePos<cycleLen-fade){ darkness=1; } // đêm sâu
+    else if(cyclePos>=cycleLen-fade){ darkness=1-((cyclePos-(cycleLen-fade))/(fade*2)); } // bình minh
     darkness=clamp(darkness,0,1)*0.62;
     if(darkness>0.01){
         ctx.fillStyle=`rgba(4,8,22,${darkness})`; ctx.fillRect(0,0,w,h);
@@ -533,10 +535,10 @@ function drawWeatherOverlay(w,h,dt){
 /* ---- Chu kỳ ngày & đêm (V4.0) — thời gian trôi chậm hơn, ban ngày ra khai thác, ban đêm về làng ---- */
 function updateDayNightCycle(dt){
     game.dayClock=(game.dayClock||0)+dt;
-    const half=game.dayCycleLength/2;
+    const daySplit=game.dayCycleLength*(game.dayFraction||0.64);
     const cyclePos=game.dayClock%game.dayCycleLength;
     const wasDaytime=game.isDaytime;
-    game.isDaytime = cyclePos<half;
+    game.isDaytime = cyclePos<daySplit;
     if(wasDaytime && !game.isDaytime){
         // Trời vừa tối: dân đang khai thác dở phải thu dọn quay về làng ngay
         for(const p of game.population){
@@ -685,7 +687,7 @@ function assignGatherTasks(){
                 for(const n of nodes){
                     if(n.resourceType!==type || (n.amount||0)<=1) continue;
                     const d=dist(s,n);
-                    if(d<0.42 && d<bd){ bd=d; chosenNode=n; chosenType=type; }
+                    if(d<0.3 && d<bd){ bd=d; chosenNode=n; chosenType=type; }
                 }
                 if(chosenNode) break;
             }
@@ -709,7 +711,7 @@ function updateGatherTasks(dt){
         if(t.phase==="moving" || t.phase==="returning"){
             const dx=p.tx-p.x, dy=p.ty-p.y, d=Math.hypot(dx,dy);
             if(d>0.004){
-                const nx=p.x+(dx/d)*0.013*dt, ny=p.y+(dy/d)*0.013*dt;
+                const nx=p.x+(dx/d)*0.022*dt, ny=p.y+(dy/d)*0.022*dt;
                 if(game.isLand(nx,ny)){ p.x=nx; p.y=ny; }
             } else if(t.phase==="moving"){
                 t.phase="mining"; t.timer=0;
