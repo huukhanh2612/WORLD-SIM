@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>World Simulator</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <div class="game">
+
+        <!-- HEADER -->
+        <header class="topbar">
+
+            <div>
+                <div class="game-title">WORLD SIMULATOR</div>
+                <div class="world-name">WORLD #001</div>
+            </div>
+
+            <div class="year-box">
+                YEAR
+                <strong id="year">1</strong>
+            </div>
+
+        </header>
+
+
+        <!-- MAIN -->
+        <main class="main">
+
+            <!-- MAP -->
+            <section class="map-area">
+
+                <canvas id="worldCanvas"></canvas>
+
+            </section>
+
+
+            <!-- SIDE PANEL -->
+            <aside class="panel">
+
+                <h2>WORLD</h2>
+
+                <div class="stat">
+                    <span>Population</span>
+                    <strong id="population">0</strong>
+                </div>
+
+                <div class="stat">
+                    <span>Alive</span>
+                    <strong id="alive">0</strong>
+                </div>
+
+                <div class="stat">
+                    <span>Countries</span>
+                    <strong id="countries">0</strong>
+                </div>
+
+                <div class="stat">
+                    <span>Cities</span>
+                    <strong id="cities">0</strong>
+                </div>
+
+                <hr>
+
+                <h2>TIME</h2>
+
+                <button onclick="runYears(1)">
+                    ▶ 1 YEAR
+                </button>
+
+                <button onclick="runYears(10)">
+                    ▶ 10 YEARS
+                </button>
+
+                <button onclick="runYears(100)">
+                    ▶ 100 YEARS
+                </button>
+
+                <hr>
+
+                <h2>EVENTS</h2>
+
+                <div id="events" class="events">
+                    <div>World created.</div>
+                    <div>100 humans spawned.</div>
+                </div>
+
+            </aside>
+
+        </main>
+
+    </div>
+
+
+    <script src="js/game.js"></script>
+
+</body>
+
+</html>
