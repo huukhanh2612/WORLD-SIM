@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html lang="vi">
 
@@ -5,97 +6,258 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>World Simulator</title>
+    <meta name="theme-color" content="#08111f">
+
+    <title>WORLD-SIM — Thế giới của anh</title>
 
     <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
-    <div class="game">
+    <!-- =========================
+         MÀN HÌNH GIỚI THIỆU
+    ========================== -->
 
-        <!-- HEADER -->
-        <header class="topbar">
+    <section id="introScreen" class="intro-screen">
 
-            <div>
-                <div class="game-title">WORLD SIMULATOR</div>
-                <div class="world-name">WORLD #001</div>
+        <div class="intro-content">
+
+            <div class="intro-symbol">🌍</div>
+
+            <div class="intro-label">
+                MỘT THẾ GIỚI. VÔ HẠN LỊCH SỬ.
             </div>
 
+            <h1>WORLD-SIM</h1>
+
+            <p class="intro-subtitle">
+                Một thế giới không có câu chuyện được viết sẵn.
+            </p>
+
+            <div class="intro-description">
+
+                <p>
+                    Anh tạo ra thế giới.
+                </p>
+
+                <p>
+                    Anh gieo sự sống.
+                </p>
+
+                <p>
+                    Còn lịch sử...
+                    <strong>để chính họ viết nên.</strong>
+                </p>
+
+            </div>
+
+            <button id="startButton" class="start-button">
+                TẠO THẾ GIỚI
+            </button>
+
+            <div class="intro-version">
+                WORLD-SIM · V0.2
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- =========================
+         MÀN HÌNH GAME
+    ========================== -->
+
+    <section id="gameScreen" class="game-screen hidden">
+
+        <!-- HEADER -->
+
+        <header class="topbar">
+
+            <div class="brand">
+
+                <div class="brand-icon">
+                    🌍
+                </div>
+
+                <div>
+
+                    <div class="game-title">
+                        WORLD-SIM
+                    </div>
+
+                    <div id="worldName" class="world-name">
+                        THẾ GIỚI #001
+                    </div>
+
+                </div>
+
+            </div>
+
+
             <div class="year-box">
-                YEAR
-                <strong id="year">1</strong>
+
+                <span>NĂM</span>
+
+                <strong id="year">
+                    1
+                </strong>
+
             </div>
 
         </header>
 
 
         <!-- MAIN -->
+
         <main class="main">
 
-            <!-- MAP -->
+            <!-- BẢN ĐỒ -->
+
             <section class="map-area">
 
                 <canvas id="worldCanvas"></canvas>
 
+                <div class="map-label">
+                    BẢN ĐỒ THẾ GIỚI
+                </div>
+
             </section>
 
 
-            <!-- SIDE PANEL -->
+            <!-- BẢNG THÔNG TIN -->
+
             <aside class="panel">
 
-                <h2>WORLD</h2>
+                <section class="panel-section">
 
-                <div class="stat">
-                    <span>Population</span>
-                    <strong id="population">0</strong>
-                </div>
+                    <h2>TỔNG QUAN</h2>
 
-                <div class="stat">
-                    <span>Alive</span>
-                    <strong id="alive">0</strong>
-                </div>
+                    <div class="stat">
 
-                <div class="stat">
-                    <span>Countries</span>
-                    <strong id="countries">0</strong>
-                </div>
+                        <span>Dân số</span>
 
-                <div class="stat">
-                    <span>Cities</span>
-                    <strong id="cities">0</strong>
-                </div>
+                        <strong id="population">
+                            0
+                        </strong>
 
-                <hr>
+                    </div>
 
-                <h2>TIME</h2>
 
-                <button onclick="runYears(1)">
-                    ▶ 1 YEAR
-                </button>
+                    <div class="stat">
 
-                <button onclick="runYears(10)">
-                    ▶ 10 YEARS
-                </button>
+                        <span>Đang sống</span>
 
-                <button onclick="runYears(100)">
-                    ▶ 100 YEARS
-                </button>
+                        <strong id="alive">
+                            0
+                        </strong>
 
-                <hr>
+                    </div>
 
-                <h2>EVENTS</h2>
 
-                <div id="events" class="events">
-                    <div>World created.</div>
-                    <div>100 humans spawned.</div>
-                </div>
+                    <div class="stat">
+
+                        <span>Quốc gia</span>
+
+                        <strong id="countries">
+                            0
+                        </strong>
+
+                    </div>
+
+
+                    <div class="stat">
+
+                        <span>Thành phố</span>
+
+                        <strong id="cities">
+                            0
+                        </strong>
+
+                    </div>
+
+                </section>
+
+
+                <section class="panel-section">
+
+                    <h2>THỜI GIAN</h2>
+
+                    <div class="time-buttons">
+
+                        <button onclick="runYears(1)">
+                            ▶ 1 NĂM
+                        </button>
+
+                        <button onclick="runYears(10)">
+                            ▶ 10 NĂM
+                        </button>
+
+                        <button onclick="runYears(100)">
+                            ▶ 100 NĂM
+                        </button>
+
+                    </div>
+
+                </section>
+
+
+                <section class="panel-section">
+
+                    <div class="section-title-row">
+
+                        <h2>LỊCH SỬ THẾ GIỚI</h2>
+
+                        <button
+                            id="clearEvents"
+                            class="small-button"
+                            title="Xóa lịch sử hiển thị"
+                        >
+                            XÓA
+                        </button>
+
+                    </div>
+
+
+                    <div id="events" class="events">
+
+                        <div class="event">
+                            Thế giới được hình thành.
+                        </div>
+
+                        <div class="event">
+                            Những con người đầu tiên xuất hiện.
+                        </div>
+
+                    </div>
+
+                </section>
 
             </aside>
 
         </main>
 
-    </div>
+
+        <!-- MOBILE BOTTOM BAR -->
+
+        <div class="mobile-controls">
+
+            <button onclick="runYears(1)">
+                ▶ 1 NĂM
+            </button>
+
+            <button onclick="runYears(10)">
+                ▶ 10 NĂM
+            </button>
+
+            <button onclick="runYears(100)">
+                ▶ 100 NĂM
+            </button>
+
+        </div>
+
+    </section>
 
 
     <script src="js/game.js"></script>
@@ -103,3 +265,4 @@
 </body>
 
 </html>
+```
