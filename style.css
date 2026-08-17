@@ -83,3 +83,29 @@
 .volume-control input[type=range]{width:80px;accent-color:#6e8eae;cursor:pointer}
 @media(max-width:900px){.volume-control input[type=range]{width:60px}}
 @media(max-width:700px){.volume-control{display:none}#switchWorldButton{padding:7px 9px;font-size:8px}}
+
+/* ---- Quyền năng thế giới: Sấm Sét (mở sẵn) + Mưa/Lốc Xoáy/Quái Vật/Động Đất (khóa),
+   XU quyền năng & Rewarded Ads (V8.0) ---- */
+.powers-section .section-title-row{align-items:center}
+.power-coins{font-size:11px;letter-spacing:.5px;color:#e0c24a;font-weight:bold;white-space:nowrap}
+.powers-list{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+.power-card{border:1px solid #26384c;border-radius:9px;background:#0e1c2e;padding:10px 12px;transition:.15s}
+.power-card.locked{opacity:.78}
+.power-card-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.power-icon{font-size:17px;line-height:1}
+.power-name{font-size:11.5px;font-weight:bold;letter-spacing:1px;color:#f5f8fb}
+.power-status{font-size:10px;letter-spacing:1px;color:#e6b25c;margin-bottom:8px}
+.power-status.available{color:#7fd8a0}
+.power-status.locked{color:#8398ad}
+.power-cast-btn{margin:0;background:#1e3a2c;border-color:#3d6b4d;color:#dcf5e6;font-size:10px;padding:9px}
+.power-cast-btn:hover:not(:disabled){background:#28513a;border-color:#5c9a76}
+.power-cast-btn:disabled{opacity:.5;cursor:default;background:#142338;border-color:#2b4057;color:#8398ad}
+.power-unlock-btn{margin:0;background:#24344a;border-color:#3a577a;color:#cfe0f2;font-size:9.5px;padding:9px}
+.power-unlock-btn:hover:not(:disabled){background:#2f4863;border-color:#6e8eae}
+.power-unlock-btn:disabled{opacity:.45;cursor:default}
+.watch-ad-btn{background:#2a2247;border-color:#4a3d78;color:#e2d8ff;font-size:10px;letter-spacing:1px}
+.watch-ad-btn:hover:not(:disabled){background:#372c5c;border-color:#7462b8}
+.watch-ad-btn:disabled{opacity:.55;cursor:default}
+.power-ad-status{min-height:14px;margin-top:6px;font-size:10px;color:#e6b25c;letter-spacing:.2px}
+.power-ad-status.ok{color:#7fd8a0}
+.power-ad-status.error{color:#e08080}
