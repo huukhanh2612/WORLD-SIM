@@ -9,6 +9,10 @@
     <div class="intro-label">TÀI KHOẢN WORLD-SIM</div>
     <h2 id="authTitle">Đăng nhập</h2>
     <p class="auth-subtitle">Nhớ vào check mail khi lần đầu đăng ký.</p>
+    <div class="auth-field hidden" id="authNameField">
+      <label>Tên người chơi</label>
+      <div class="auth-input-wrap"><span>👤</span><input id="authNameInput" type="text" placeholder="Tên hiển thị của anh" maxlength="24" autocomplete="nickname"></div>
+    </div>
     <div class="auth-field">
       <label>Email</label>
       <div class="auth-input-wrap"><span>✉️</span><input id="authEmailInput" type="email" placeholder="Nhập gmail của bạn" autocomplete="username"></div>
@@ -31,6 +35,7 @@
     <div class="intro-label">TÀI KHOẢN WORLD-SIM</div>
     <h2>Các thế giới của anh</h2>
     <p class="auth-subtitle">Chọn một thế giới để tiếp tục, hoặc tạo một thế giới mới.</p>
+    <div id="worldListProfileBar" class="auth-status ok"></div>
     <div id="worldListStatus" class="auth-status"></div>
     <div id="worldListItems" class="world-list-items"></div>
     <button id="newWorldFromListButton" class="create-world-button">+ TẠO THẾ GIỚI MỚI</button>
@@ -44,7 +49,7 @@
 
 <section id="setupScreen" class="setup-screen hidden"><div class="setup-card"><div class="setup-symbol">🌎</div><div class="intro-label">KHỞI TẠO MỘT THẾ GIỚI MỚI</div><h2>Thiết lập thế giới</h2><label>Tên thế giới</label><input id="worldNameInput" type="text" value="Hoàng Đế I" maxlength="30"><label>Số người ban đầu</label><div class="range-row"><input id="populationInput" type="range" min="20" max="300" value="100"><strong id="populationValue">100</strong></div><label>Tài nguyên map</label><div class="choice-row" id="resourceChoices"><button data-value="0.65">Khan hiếm</button><button data-value="1" class="selected">Cân bằng</button><button data-value="1.35">Dồi dào</button></div><label>Khí hậu</label><div class="choice-row" id="climateChoices"><button data-value="dry">Khô</button><button data-value="temperate" class="selected">Ôn hòa</button><button data-value="wet">Ẩm</button></div><label>Loại bản đồ</label><div class="choice-row" id="mapTypeChoices"><button data-value="continent" class="selected">Lục địa</button><button data-value="archipelago">Quần đảo</button><button data-value="pangaea">Đại lục</button><button data-value="desert">Sa mạc</button><button data-value="coastal">Duyên hải</button><button data-value="highlands">Cao nguyên</button></div><button id="createWorldButton" class="create-world-button">BẮT ĐẦU THẾ GIỚI</button><button id="backToIntro" class="back-button">QUAY LẠI</button><div class="copyright">© 2026 PHAN HỮU KHÁNH</div></div></section>
 
-<section id="gameScreen" class="game-screen hidden"><header class="topbar"><div class="brand"><div class="brand-icon">🌍</div><div><div class="game-title">WORLD-SIM</div><div id="worldName" class="world-name">THẾ GIỚI</div></div></div><div class="topbar-right"><div id="saveStatus" class="save-status"></div><button id="switchWorldButton" class="small-button account-button" title="Chọn thế giới khác">🗺️ THẾ GIỚI</button><button id="logoutButton" class="small-button account-button" title="Đăng xuất">ĐĂNG XUẤT</button><div class="volume-control" title="Âm lượng"><input id="volumeSlider" type="range" min="0" max="100" value="70"></div><button id="audioToggle" class="audio-toggle" title="Bật/tắt âm thanh">🔊</button><div class="year-box"><span>NĂM</span><strong id="year">1</strong></div></div></header><main class="main"><section class="map-area"><canvas id="worldCanvas"></canvas><div class="map-label">BẢN ĐỒ THẾ GIỚI</div><div class="zoom-controls"><button id="zoomIn">+</button><button id="zoomOut">−</button><button id="zoomReset">⤾</button></div><div id="mapHint" class="map-hint">Thế giới đang tự vận động... Nhấp vào làng để xem chi tiết. Cuộn/kéo để phóng to.</div></section><aside class="panel">
+<section id="gameScreen" class="game-screen hidden"><header class="topbar"><div class="brand"><div class="brand-icon">🌍</div><div><div class="game-title">WORLD-SIM</div><div id="worldName" class="world-name">THẾ GIỚI</div></div></div><div class="topbar-right"><div id="topbarProfileBadge" class="save-status"></div><div id="saveStatus" class="save-status"></div><button id="switchWorldButton" class="small-button account-button" title="Chọn thế giới khác">🗺️ THẾ GIỚI</button><button id="logoutButton" class="small-button account-button" title="Đăng xuất">ĐĂNG XUẤT</button><div class="volume-control" title="Âm lượng"><input id="volumeSlider" type="range" min="0" max="100" value="70"></div><button id="audioToggle" class="audio-toggle" title="Bật/tắt âm thanh">🔊</button><div class="year-box"><span>NĂM</span><strong id="year">1</strong></div></div></header><main class="main"><section class="map-area"><canvas id="worldCanvas"></canvas><div class="map-label">BẢN ĐỒ THẾ GIỚI</div><div class="zoom-controls"><button id="zoomIn">+</button><button id="zoomOut">−</button><button id="zoomReset">⤾</button></div><div id="mapHint" class="map-hint">Thế giới đang tự vận động... Nhấp vào làng để xem chi tiết. Cuộn/kéo để phóng to.</div></section><aside class="panel">
 <section class="panel-section powers-section">
   <div class="section-title-row"><h2>QUYỀN NĂNG THẾ GIỚI</h2><span id="powerCoinsDisplay" class="power-coins">🪙 XU: 0</span></div>
   <div class="powers-list">
@@ -178,9 +183,9 @@
 
 <section id="endgameScreen" class="intro-screen hidden">
   <div class="intro-content">
-    <div class="intro-symbol">💀</div>
-    <div class="intro-label">VƯƠNG QUỐC ĐÃ SỤP ĐỔ</div>
-    <h1>ENDGAME</h1>
+    <div class="intro-symbol" id="endgameIcon">💀</div>
+    <div class="intro-label" id="endgameLabel">VƯƠNG QUỐC ĐÃ SỤP ĐỔ</div>
+    <h1 id="endgameTitle">ENDGAME</h1>
     <p class="intro-subtitle" id="endgameSubtitle">Vương quốc của anh đã diệt vong.</p>
     <div class="intro-description" id="endgameDetail"><p>Lịch sử đã sang trang khác.</p></div>
     <button id="endgameRestartButton" class="start-button">VỀ TRANG TẠO THẾ GIỚI</button>
