@@ -737,12 +737,14 @@ function simulatePeople(){
     }
     for(const p of alive()){
         if(p.task) continue; // Đang bận khai thác, không tự ý lang thang
+        if(p.role==="civilian" && isSettlementAtWar(getSettlement(p.settlement))) continue; // (V10.0) chiến tranh — ở yên trong làng
         if(Math.random()<.01){
             const a=rnd(0,Math.PI*2),step=rnd(.01,.025);
             let nx=clamp(p.x+Math.cos(a)*step,.02,.98), ny=clamp(p.y+Math.sin(a)*step,.02,.98);
             if(game.isLand(nx,ny)) { p.tx=nx; p.ty=ny; }
         }
     }
+    recallVillagersAtWar();
     if(game.year<600 && alive().length<Math.max(20,game.settings.population*.25)){
         const target=Math.max(30,Math.floor(game.settings.population*.55));
         for(let i=alive().length;i<target;i++){ const q=randomLandPoint(); game.population.push(new Person(game.nextPerson++,q.x,q.y,ri(18,35))); }
@@ -758,6 +760,7 @@ function assignGatherTasks(){
     if(!nodes || !nodes.length) return;
     for(const s of game.settlements){
         if(!s.stock) s.stock={wood:0,iron:0,copper:0,gold:0,diamond:0};
+        if(isSettlementAtWar(s)) continue; // (V10.0) đang có chiến tranh — dân làng ở yên trong làng, không đi khai thác
         const workingNow=game.population.filter(p=>p.alive&&p.settlement===s.id&&p.task).length;
         const capacity=Math.max(1, Math.floor(s.population*0.35));
         let free=capacity-workingNow;
@@ -882,6 +885,14 @@ function simulateEconomy() {
             }
         }
 
+        // Trạm Chiến Đấu — công trình bắt buộc phải xây trước khi làng/quốc gia được phép
+        // tham chiến (tấn công hoặc bị tấn công). Xây tự động khi đủ Gỗ & Sắt dự trữ. (V10.0)
+        if(!s.warCamp && (s.stock.wood||0)>=150 && (s.stock.iron||0)>=40){
+            s.stock.wood-=150; s.stock.iron-=40;
+            s.warCamp=true;
+            addEvent(`🏗️ ${s.name} đã xây xong Trạm Chiến Đấu — từ nay đủ điều kiện tham chiến.`,true);
+        }
+
         s.resources=settlementWealth(s);
     }
     const nodes=game.terrain.resourceNodes;
@@ -905,7 +916,8 @@ function makeSettlement(base){
         leader:{name:randomLeaderName(),title:pick(VILLAGE_TITLES)},
         tech:1, territory:.045, founded:game.year, conquests:0,
         stock:{wood:80,iron:20,copper:10,gold:2,diamond:0}, resources:130, military: 10, soldiers: 0, // Khởi tạo ban đầu
-        gatherMultiplier:1, catapults:0, guns:0 // V5.0: sức thu thập & khí tài công thành
+        gatherMultiplier:1, catapults:0, guns:0, // V5.0: sức thu thập & khí tài công thành
+        warCamp:false // (V10.0) phải xây Trạm Chiến Đấu mới được phép tham chiến
     };
 }
 
@@ -1171,22 +1183,34 @@ function simulateWars(){
         const scarcityChance = resourceDesperate && nearest<scarcityRange ? 0.06+scarcity*0.22 : 0;
         if(Math.random()<normalChance+scarcityChance){
             const reason = scarcityChance>normalChance ? "resource" : "territory";
+            if(!countryHasWarCamp(a) || !countryHasWarCamp(b)) continue; // (V10.0) chưa bên nào xây Trạm Chiến Đấu thì chưa thể khai chiến
             if(involvesPlayer){
                 // (V6.0) Vương quốc của người chơi không bao giờ bị lôi vào chiến tranh mà không hỏi
                 // ý kiến — đối phương chỉ có thể ĐỀ NGHỊ tuyên chiến, người chơi phải xác nhận.
                 const enemy = a.id===game.playerCountry ? b : a;
                 queueWarProposal(enemy, reason);
             } else {
-                game.wars.push({id:game.nextWar++,a:a.id,b:b.id,age:0,score:0,reason});
-                if(reason==="resource") addEvent(`⚔️ ${a.name} tuyên chiến với ${b.name} để tranh đoạt tài nguyên đang khan hiếm.`,true);
-                else addEvent(`⚔️ ${a.name} tuyên chiến với ${b.name} vì tranh giành lãnh thổ.`,true);
+                const marchYears=marchYearsFor(a,b);
+                game.wars.push({id:game.nextWar++,a:a.id,b:b.id,age:0,score:0,reason,marching:true,marchYears});
+                if(reason==="resource") addEvent(`⚔️ ${a.name} tuyên chiến với ${b.name} để tranh đoạt tài nguyên đang khan hiếm. Quân đội cần khoảng ${marchYears} năm hành quân đến nơi.`,true);
+                else addEvent(`⚔️ ${a.name} tuyên chiến với ${b.name} vì tranh giành lãnh thổ. Quân đội cần khoảng ${marchYears} năm hành quân đến nơi.`,true);
                 playSfx("war");
+                recallVillagersAtWar();
             }
         }
     }
     for(const w of [...game.wars]){
         const a=getCountry(w.a),b=getCountry(w.b); if(!a||!b) continue;
         w.age++;
+        if(w.marching){
+            // (V10.0) Binh lính & máy bắn đá đang trên đường hành quân đến điểm tấn công — chưa giao tranh.
+            w.marchYears=(w.marchYears||1)-1;
+            if(w.marchYears<=0){
+                w.marching=false;
+                addEvent(`🚩 Quân đội ${a.name} đã hành quân đến nơi, giao tranh với ${b.name} chính thức bắt đầu!`,true);
+            }
+            continue;
+        }
         // Thắng thua dựa vào binh lính, tài nguyên và sự hỗ trợ của đồng minh
         const pa=warPower(a,b.id), pb=warPower(b,a.id);
         const result=pa-pb+rnd(-pa*0.15-30,pb*0.15+30); w.score+=result>0?1:-1;
@@ -1213,6 +1237,45 @@ function simulateWars(){
             for(const sid of loser.settlements){ const s=getSettlement(sid); if(s) s.soldiers=Math.max(0,Math.floor((s.soldiers||0)*0.65)); }
             addEvent(`🕊️ Chiến tranh kết thúc. ${winner.name} giành thắng lợi nhờ ưu thế binh lực${(winner.allies||[]).length?" và sự trợ giúp của đồng minh":""}.`,true);
             game.wars=game.wars.filter(x=>x.id!==w.id);
+        }
+    }
+}
+
+// ---- (V10.0) Trạm Chiến Đấu & hành quân: quốc gia phải có ít nhất 1 làng đã xây Trạm
+// Chiến Đấu mới được phép tham chiến; khi có chiến tranh, dân thường phải rút hết về
+// làng (chỉ còn binh lính ở ngoài); và quân đội cần thời gian hành quân tùy khoảng cách. ----
+function countryHasWarCamp(country){
+    if(!country) return false;
+    return (country.settlements||[]).some(id=>{ const s=getSettlement(id); return s&&s.warCamp; });
+}
+function isSettlementAtWar(s){
+    if(!s || !s.country) return false;
+    return game.wars.some(w=>w.a===s.country||w.b===s.country);
+}
+function nearestCountryDistance(a,b){
+    let nearest=999;
+    for(const x of (a.settlements||[]).map(getSettlement).filter(Boolean))
+        for(const y of (b.settlements||[]).map(getSettlement).filter(Boolean))
+            nearest=Math.min(nearest,dist(x,y));
+    return nearest===999?0.3:nearest;
+}
+// Số năm hành quân cần thiết trước khi giao tranh thật sự bắt đầu, tùy khoảng cách giữa 2 quốc gia.
+function marchYearsFor(a,b){ return Math.max(1, Math.round(nearestCountryDistance(a,b)*14)); }
+// Dân thường của các làng đang có chiến tranh phải bỏ dở việc khai thác, quay về làng ngay lập tức —
+// chỉ binh lính mới ở lại bên ngoài.
+function recallVillagersAtWar(){
+    for(const p of game.population){
+        if(!p.alive || p.role!=="civilian") continue;
+        const s=getSettlement(p.settlement);
+        if(!s || !isSettlementAtWar(s)) continue;
+        if(p.task){
+            if(p.task.phase!=="returning"){
+                p.task.phase="returning";
+                const home=getSettlement(p.home||p.settlement);
+                if(home){ p.tx=clamp(home.x+rnd(-.01,.01),.02,.98); p.ty=clamp(home.y+rnd(-.01,.01),.02,.98); }
+            }
+        } else if(dist(p,s)>0.03){
+            p.tx=clamp(s.x+rnd(-.01,.01),.02,.98); p.ty=clamp(s.y+rnd(-.01,.01),.02,.98);
         }
     }
 }
@@ -1313,6 +1376,7 @@ function openSettlementModal(s, select=true){
     setModalText("modalStockDetail", s.stock?RESOURCE_TYPES.map(k=>`${RESOURCE_META[k].icon}${fmt(s.stock[k]||0)}`).join("  "):"—");
     setModalText("modalMilitary", fmt(Math.floor(s.military)));
     setModalText("modalSiegeWeapons", `🏗️ ${fmt(s.catapults||0)} máy bắn đá  /  🔫 ${fmt(s.guns||0)} súng`);
+    setModalText("modalWarCamp", s.warCamp ? "✅ Đã xây — đủ điều kiện tham chiến" : "🔒 Chưa xây — chưa thể tham chiến");
     setModalText("modalTech", TECH_NAMES[clamp((s.tech||1)-1,0,4)]);
     setModalText("modalConquests", s.conquests?`${s.conquests} lần chinh phục làng khác`:"Chưa từng chinh chiến");
     if(c && c.court){
@@ -1368,7 +1432,7 @@ function choosePlayerSettlement(id){
     const s=getSettlement(id);
     if(!s) return;
     for(const x of game.settlements) x.gatherMultiplier=1;
-    s.gatherMultiplier=0.3; // dưới 1/3 so với các làng còn lại
+    s.gatherMultiplier=0.5; // (Tăng tốc khai thác người chơi) trước là 0.3 — vẫn thấp hơn làng khác nhưng đỡ chậm hơn
     game.playerSettlement=id;
     game.awaitingPlayerChoice=false;
     document.getElementById("villageChoiceModal")?.classList.add("hidden");
@@ -1456,9 +1520,11 @@ function resolveWarProposal(accept){
     const enemy=prop?getCountry(prop.enemyId):null;
     if(player && enemy){
         if(accept){
-            game.wars.push({id:game.nextWar++,a:player.id,b:enemy.id,age:0,score:0,reason:prop.reason});
-            addEvent(`⚔️ Anh quyết định nghênh chiến! ${player.name} chính thức giao tranh với ${enemy.name}.`,true);
+            const marchYears=marchYearsFor(player,enemy);
+            game.wars.push({id:game.nextWar++,a:player.id,b:enemy.id,age:0,score:0,reason:prop.reason,marching:true,marchYears});
+            addEvent(`⚔️ Anh quyết định nghênh chiến! ${player.name} chính thức giao tranh với ${enemy.name}. Quân đội cần khoảng ${marchYears} năm hành quân đến nơi.`,true);
             playSfx("war");
+            recallVillagersAtWar();
         } else {
             const pa=warPower(player,enemy.id), pb=warPower(enemy,player.id);
             const chance=clamp(0.35+(pa-pb)/(pa+pb+1)*0.3,0.15,0.75);
@@ -1466,9 +1532,11 @@ function resolveWarProposal(accept){
                 addEvent(`🕊️ Sứ giả của anh thương lượng thành công, ${enemy.name} tạm gác chuyện binh đao với ${player.name}.`,true);
                 playSfx("peace");
             } else {
-                game.wars.push({id:game.nextWar++,a:player.id,b:enemy.id,age:0,score:0,reason:prop.reason});
-                addEvent(`⚔️ Cầu hòa thất bại! ${enemy.name} vẫn tuyên chiến với ${player.name}.`,true);
+                const marchYears=marchYearsFor(player,enemy);
+                game.wars.push({id:game.nextWar++,a:player.id,b:enemy.id,age:0,score:0,reason:prop.reason,marching:true,marchYears});
+                addEvent(`⚔️ Cầu hòa thất bại! ${enemy.name} vẫn tuyên chiến với ${player.name}. Quân đội cần khoảng ${marchYears} năm hành quân đến nơi.`,true);
                 playSfx("war");
+                recallVillagersAtWar();
             }
         }
     }
@@ -1487,10 +1555,14 @@ function playerAttackSettlement(targetId){
         addEvent(`⚔️ ${player.name} đã trong tình trạng giao tranh với ${enemy.name}.`);
         return;
     }
-    if(!confirm(`Xác nhận tấn công ${enemy.name}? ${player.name} sẽ chính thức tuyên chiến.`)) return;
-    game.wars.push({id:game.nextWar++,a:player.id,b:enemy.id,age:0,score:0,reason:"player"});
-    addEvent(`⚔️ Theo lệnh của anh, ${player.name} chủ động tuyên chiến với ${enemy.name}!`,true);
+    if(!countryHasWarCamp(player)){ addEvent(`🏗️ ${player.name} chưa xây Trạm Chiến Đấu — chưa đủ điều kiện tham chiến.`); return; }
+    if(!countryHasWarCamp(enemy)){ addEvent(`🏗️ ${enemy.name} chưa xây Trạm Chiến Đấu, chưa thể bị tấn công.`); return; }
+    const marchYears=marchYearsFor(player,enemy);
+    if(!confirm(`Xác nhận tấn công ${enemy.name}? ${player.name} sẽ chính thức tuyên chiến — quân đội cần khoảng ${marchYears} năm hành quân đến nơi.`)) return;
+    game.wars.push({id:game.nextWar++,a:player.id,b:enemy.id,age:0,score:0,reason:"player",marching:true,marchYears});
+    addEvent(`⚔️ Theo lệnh của anh, ${player.name} chủ động tuyên chiến với ${enemy.name}! Quân đội cần khoảng ${marchYears} năm hành quân đến nơi.`,true);
     playSfx("war");
+    recallVillagersAtWar();
     closeSettlementModal(); update(); start();
 }
 // Người chơi chủ động đề nghị kết minh với 1 quốc gia khác
