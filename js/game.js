@@ -20,7 +20,9 @@ const game = {
     view: { zoom: 1, ox: 0, oy: 0 },
     scarcityRatio: 1,
     // Làng chủ lực của người chơi & vương quốc (V5.0)
-    playerSettlement: null, playerCountry: null, awaitingPlayerChoice: false, awaitingKingdomChoice: false
+    playerSettlement: null, playerCountry: null, awaitingPlayerChoice: false, awaitingKingdomChoice: false,
+    // (V6.0) Mọi quyết định chiến tranh / kế vị của vương quốc người chơi đều phải chờ xác nhận
+    pendingWarProposal: null, pendingHeirChoice: null, heirCandidates: null
 };
 
 const SETTLEMENT_NAMES = ["An Lạc","Bình Minh","Hòa Sơn","Thanh Hà","Phú An","Tân Lộc","Minh Châu","Vạn Phúc","Nam Sơn","Đông Hải","Trường An","Thiên Phúc","Đại Sơn","Thịnh Vượng","Hải Bình"];
@@ -626,12 +628,21 @@ function createWorld(){
     game.depletedNotified=false; game.scarcityWarned=false;
     game.view={zoom:1,ox:0,oy:0};
     game.playerSettlement=null; game.playerCountry=null; game.awaitingPlayerChoice=false; game.awaitingKingdomChoice=false; game.kingdomChoiceNextThreshold=0;
+    game.pendingWarProposal=null; game.pendingHeirChoice=null; game.heirCandidates=null;
 
     game.settlementTarget=ri(8,16); game.firstCountryYear=ri(35,60); game.secondCountryYear=ri(70,110);
     game.expansionYear=ri(90,140); game.warEligibleYear=ri(60,100); game.majorWarYear=ri(120,170);
     createTerrain(); ensureWeatherAssets();
 
-    // Tổng tài nguyên map (gỗ, sắt, đồng, vàng, kim cương) suy ra từ các mỏ/rừng vừa tạo
+    // (V6.0) Tổng tài nguyên map luôn ngẫu nhiên và KHÔNG BAO GIỜ vượt quá 180.000 đơn vị.
+    // Sau khi tạo địa hình xong, ta tính tổng thô rồi co giãn tỉ lệ mọi mỏ/rừng cho khớp mục tiêu.
+    const rawTotal = game.terrain.resourceNodes.reduce((n,r)=>n+(r.amount||0),0) || 1;
+    const targetTotal = ri(50000,180000);
+    const scale = targetTotal/rawTotal;
+    for(const node of game.terrain.resourceNodes){
+        node.maxAmount = Math.max(1, Math.round(node.maxAmount*scale));
+        node.amount = node.maxAmount;
+    }
     game.mapResources = game.terrain.resourceNodes.reduce((n,r)=>n+(r.amount||0),0);
     game.initialMapResources = game.mapResources || 1;
     game.scarcityRatio = 1;
@@ -924,11 +935,14 @@ function simulateSettlements(){
 
 function simulateRaids(){
     const independents=game.settlements.filter(s=>!s.country && s.population>=10 && s.age>=5);
+    // (V6.0) Làng chủ lực của người chơi không bao giờ TỰ Ý đi tập kích làng khác —
+    // mọi cuộc tấn công của người chơi phải qua nút "Tấn công" và được xác nhận rõ ràng.
+    const attackers=independents.filter(s=>s.id!==game.playerSettlement);
     const scarcity=1-(game.scarcityRatio!==undefined?game.scarcityRatio:1);
     // (V5.1) Khi tài nguyên gần cạn kiệt hoàn toàn, các làng buộc phải tấn công lẫn nhau để sinh tồn —
     // tỉ lệ tập kích tăng mạnh hơn nhiều so với trước.
     const raidChance=0.05+(scarcity>0.5?scarcity*0.16:0)+(scarcity>0.85?0.18:0);
-    for(const s of independents){
+    for(const s of attackers){
         if(Math.random()>raidChance) continue;
         let target=null,best=.22;
         const range=scarcity>0.5?.4:.22;
@@ -987,7 +1001,9 @@ function simulateRaids(){
 
 function formCountries(){
     if(game.settlements.length<2) return;
-    const eligible=game.settlements.filter(s=>!s.country&&s.population>=15&&s.age>=8);
+    // (V6.0) Làng chủ lực của người chơi KHÔNG BAO GIỜ được tự động lập quốc hay bị sáp nhập —
+    // việc lập vương quốc / làm chư hầu chỉ xảy ra khi người chơi tự quyết định qua bảng lựa chọn.
+    const eligible=game.settlements.filter(s=>!s.country&&s.population>=15&&s.age>=8&&s.id!==game.playerSettlement);
     if(game.countries.length===0 && game.year>=game.firstCountryYear && eligible.length){
         const s=eligible.sort((a,b)=>b.population-a.population)[0]; createCountry(s);
     }
@@ -1009,7 +1025,7 @@ function formCountries(){
         c.civilians = Math.max(0,c.population-c.totalSoldiers);
         c.power= c.population*0.4 + c.totalMilitary*0.6; // Sức mạnh quốc gia phụ thuộc lớn vào Khí tài
     }
-    for(const s of game.settlements.filter(s=>!s.country&&s.population>=12)){
+    for(const s of game.settlements.filter(s=>!s.country&&s.population>=12&&s.id!==game.playerSettlement)){
         let best=null,bd=.2;
         for(const c of game.countries) for(const sid of c.settlements){ const z=getSettlement(sid),d=dist(s,z); if(d<bd){ bd=d; best=c; } }
         if(best && Math.random()<.08){
@@ -1044,6 +1060,10 @@ function simulateGovernment(){
         if(k.age>85) deathChance=.35;
         if(reignLength>65) deathChance=Math.max(deathChance,.05);
         if(Math.random()<deathChance){
+            if(c.isPlayerCountry){
+                queueHeirChoice(c); // (V6.0) người chơi tự chọn người kế vị cho vương quốc của mình
+                continue;
+            }
             const oldTitle=k.title, oldName=k.name;
             let newKing;
             if(Math.random()<.55){
@@ -1071,6 +1091,9 @@ function simulateAlliances(){
     for(const c of game.countries) if(!c.allies) c.allies=[];
     for(let i=0;i<game.countries.length;i++) for(let j=i+1;j<game.countries.length;j++){
         const a=game.countries[i],b=game.countries[j];
+        // (V6.0) Vương quốc của người chơi KHÔNG tự động kết minh — người chơi phải chủ động
+        // đề nghị kết minh qua nút "Đề nghị kết minh" trong bảng thông tin làng.
+        if(a.id===game.playerCountry || b.id===game.playerCountry) continue;
         if(a.allies.includes(b.id)) continue;
         const atWar=game.wars.some(w=>(w.a===a.id&&w.b===b.id)||(w.a===b.id&&w.b===a.id));
         if(atWar) continue;
@@ -1111,6 +1134,8 @@ function simulateWars(){
     for(let i=0;i<game.countries.length;i++) for(let j=i+1;j<game.countries.length;j++){
         const a=game.countries[i],b=game.countries[j];
         if(game.wars.some(w=>(w.a===a.id&&w.b===b.id)||(w.a===b.id&&w.b===a.id))) continue;
+        const involvesPlayer = a.id===game.playerCountry || b.id===game.playerCountry;
+        if(involvesPlayer && game.pendingWarProposal) continue; // đã có 1 đề nghị đang chờ người chơi trả lời
         let nearest=999;
         for(const x of a.settlements.map(getSettlement).filter(Boolean)) for(const y of b.settlements.map(getSettlement).filter(Boolean)) nearest=Math.min(nearest,dist(x,y));
         const scarcity=1-(game.scarcityRatio!==undefined?game.scarcityRatio:1);
@@ -1121,9 +1146,18 @@ function simulateWars(){
         const scarcityRange = scarcity>0.85 ? .6 : .32;
         const scarcityChance = resourceDesperate && nearest<scarcityRange ? 0.06+scarcity*0.22 : 0;
         if(Math.random()<normalChance+scarcityChance){
-            game.wars.push({id:game.nextWar++,a:a.id,b:b.id,age:0,score:0,reason:scarcityChance>normalChance?"resource":"territory"});
-            if(scarcityChance>normalChance) addEvent(`⚔️ ${a.name} tuyên chiến với ${b.name} để tranh đoạt tài nguyên đang khan hiếm.`,true);
-            else addEvent(`⚔️ ${a.name} tuyên chiến với ${b.name} vì tranh giành lãnh thổ.`,true);
+            const reason = scarcityChance>normalChance ? "resource" : "territory";
+            if(involvesPlayer){
+                // (V6.0) Vương quốc của người chơi không bao giờ bị lôi vào chiến tranh mà không hỏi
+                // ý kiến — đối phương chỉ có thể ĐỀ NGHỊ tuyên chiến, người chơi phải xác nhận.
+                const enemy = a.id===game.playerCountry ? b : a;
+                queueWarProposal(enemy, reason);
+            } else {
+                game.wars.push({id:game.nextWar++,a:a.id,b:b.id,age:0,score:0,reason});
+                if(reason==="resource") addEvent(`⚔️ ${a.name} tuyên chiến với ${b.name} để tranh đoạt tài nguyên đang khan hiếm.`,true);
+                else addEvent(`⚔️ ${a.name} tuyên chiến với ${b.name} vì tranh giành lãnh thổ.`,true);
+                playSfx("war");
+            }
         }
     }
     for(const w of [...game.wars]){
@@ -1269,6 +1303,23 @@ function openSettlementModal(s, select=true){
         setModalText("modalCountryLeader","—"); setModalText("modalChancellor","—");
         setModalText("modalGeneral","—"); setModalText("modalTreasurer","—"); setModalText("modalAdvisor","—");
     }
+    const actionsBox=document.getElementById("modalDiplomacyActions");
+    if(actionsBox){
+        const player=game.playerCountry?getCountry(game.playerCountry):null;
+        if(player && s.country && s.country!==player.id){
+            const enemy=getCountry(s.country);
+            const atWar=enemy && game.wars.some(w=>(w.a===player.id&&w.b===enemy.id)||(w.a===enemy.id&&w.b===player.id));
+            const allied=enemy && (player.allies||[]).includes(enemy.id);
+            actionsBox.classList.remove("hidden");
+            actionsBox.innerHTML=`
+                <button id="modalAttackBtn" class="danger-button">${atWar?"⚔️ ĐANG GIAO TRANH":"⚔️ TẤN CÔNG"}</button>
+                <button id="modalAllianceBtn" class="ally-button" ${atWar||allied?"disabled":""}>${allied?"🤝 ĐÃ LÀ ĐỒNG MINH":"🤝 ĐỀ NGHỊ KẾT MINH"}</button>`;
+            document.getElementById("modalAttackBtn")?.addEventListener("click",()=>playerAttackSettlement(s.id));
+            document.getElementById("modalAllianceBtn")?.addEventListener("click",()=>playerProposeAlliance(s.id));
+        } else {
+            actionsBox.classList.add("hidden"); actionsBox.innerHTML="";
+        }
+    }
     document.getElementById("settlementModal")?.classList.remove("hidden");
 }
 function closeSettlementModal(){ game.selectedSettlement=null; document.getElementById("settlementModal")?.classList.add("hidden"); }
@@ -1298,6 +1349,7 @@ function choosePlayerSettlement(id){
     game.awaitingPlayerChoice=false;
     document.getElementById("villageChoiceModal")?.classList.add("hidden");
     addEvent(`👤 Anh chọn dẫn dắt ${s.name} làm làng chủ lực của mình. Sức thu thập tài nguyên nơi đây giảm mạnh do dồn lực quản lý.`,true);
+    playSfx("click");
     update(); start();
 }
 
@@ -1325,6 +1377,7 @@ function triggerKingdomChoice(s){
     const nameInput=document.getElementById("kingdomNameInput");
     if(nameInput) nameInput.value=uniqueName(COUNTRY_NAMES);
     if(sub) sub.textContent=`${s.name} đã tích lũy ${fmt(s.resources)} tài nguyên — đủ để dựng nghiệp lớn. Anh muốn lập vương quốc riêng, hay làm chư hầu?`;
+    playSfx("alert");
     if(vassalBtn){
         if(nearestCountry){ vassalBtn.disabled=false; vassalBtn.textContent=`LÀM CHƯ HẦU CHO ${nearestCountry.name.toUpperCase()}`; vassalBtn.dataset.countryId=nearestCountry.id; }
         else { vassalBtn.disabled=true; vassalBtn.textContent="KHÔNG CÓ NƯỚC LÁNG GIỀNG"; }
@@ -1344,7 +1397,7 @@ function foundPlayerKingdom(){
     const chosenName=document.getElementById("kingdomNameInput")?.value||"";
     createCountry(s, chosenName);
     const c=getCountry(s.country);
-    if(c){ c.isPlayerCountry=true; game.playerCountry=c.id; addEvent(`👑 Anh xưng vương, lập nên ${c.name}! Từ nay đây là vương quốc của anh.`,true); }
+    if(c){ c.isPlayerCountry=true; game.playerCountry=c.id; addEvent(`👑 Anh xưng vương, lập nên ${c.name}! Từ nay đây là vương quốc của anh.`,true); playSfx("found"); }
     game.awaitingKingdomChoice=false;
     document.getElementById("kingdomChoiceModal")?.classList.add("hidden");
     update(); start();
@@ -1356,8 +1409,122 @@ function becomeVassal(countryId){
     s.country=c.id; c.settlements.push(s.id);
     for(const p of alive()) if(p.settlement===s.id) p.country=c.id;
     addEvent(`🤝 ${s.name} thần phục ${c.name}, trở thành chư hầu để được bảo hộ.`,true);
+    playSfx("alliance");
     game.awaitingKingdomChoice=false;
     document.getElementById("kingdomChoiceModal")?.classList.add("hidden");
+    update(); start();
+}
+
+/* ---------------------------- CHIẾN TRANH & NGOẠI GIAO CẦN SỰ ĐỒNG Ý CỦA NGƯỜI CHƠI (V6.0) ---------------------------- */
+function queueWarProposal(enemyCountry, reason){
+    if(!game.playerCountry || game.pendingWarProposal || !enemyCountry) return;
+    game.pendingWarProposal={enemyId:enemyCountry.id, reason};
+    stop();
+    const player=getCountry(game.playerCountry);
+    const sub=document.getElementById("warProposalSub");
+    if(sub) sub.textContent=`${enemyCountry.name} đang tập trung quân đội và muốn tuyên chiến với ${player?player.name:"vương quốc của anh"}${reason==="resource"?" để tranh đoạt tài nguyên đang khan hiếm":" vì tranh chấp lãnh thổ"}. Anh quyết định thế nào?`;
+    document.getElementById("warProposalModal")?.classList.remove("hidden");
+    playSfx("alert");
+}
+function resolveWarProposal(accept){
+    const prop=game.pendingWarProposal;
+    const player=getCountry(game.playerCountry);
+    const enemy=prop?getCountry(prop.enemyId):null;
+    if(player && enemy){
+        if(accept){
+            game.wars.push({id:game.nextWar++,a:player.id,b:enemy.id,age:0,score:0,reason:prop.reason});
+            addEvent(`⚔️ Anh quyết định nghênh chiến! ${player.name} chính thức giao tranh với ${enemy.name}.`,true);
+            playSfx("war");
+        } else {
+            const pa=warPower(player,enemy.id), pb=warPower(enemy,player.id);
+            const chance=clamp(0.35+(pa-pb)/(pa+pb+1)*0.3,0.15,0.75);
+            if(Math.random()<chance){
+                addEvent(`🕊️ Sứ giả của anh thương lượng thành công, ${enemy.name} tạm gác chuyện binh đao với ${player.name}.`,true);
+                playSfx("peace");
+            } else {
+                game.wars.push({id:game.nextWar++,a:player.id,b:enemy.id,age:0,score:0,reason:prop.reason});
+                addEvent(`⚔️ Cầu hòa thất bại! ${enemy.name} vẫn tuyên chiến với ${player.name}.`,true);
+                playSfx("war");
+            }
+        }
+    }
+    game.pendingWarProposal=null;
+    document.getElementById("warProposalModal")?.classList.add("hidden");
+    update(); start();
+}
+// Người chơi chủ động tấn công 1 quốc gia khác — luôn cần bấm nút và xác nhận rõ ràng
+function playerAttackSettlement(targetId){
+    const player=getCountry(game.playerCountry);
+    const target=getSettlement(targetId);
+    if(!player||!target||!target.country||target.country===player.id) return;
+    const enemy=getCountry(target.country);
+    if(!enemy) return;
+    if(game.wars.some(w=>(w.a===player.id&&w.b===enemy.id)||(w.a===enemy.id&&w.b===player.id))){
+        addEvent(`⚔️ ${player.name} đã trong tình trạng giao tranh với ${enemy.name}.`);
+        return;
+    }
+    if(!confirm(`Xác nhận tấn công ${enemy.name}? ${player.name} sẽ chính thức tuyên chiến.`)) return;
+    game.wars.push({id:game.nextWar++,a:player.id,b:enemy.id,age:0,score:0,reason:"player"});
+    addEvent(`⚔️ Theo lệnh của anh, ${player.name} chủ động tuyên chiến với ${enemy.name}!`,true);
+    playSfx("war");
+    closeSettlementModal(); update(); start();
+}
+// Người chơi chủ động đề nghị kết minh với 1 quốc gia khác
+function playerProposeAlliance(targetId){
+    const player=getCountry(game.playerCountry);
+    const target=getSettlement(targetId);
+    if(!player||!target||!target.country||target.country===player.id) return;
+    const enemy=getCountry(target.country);
+    if(!enemy) return;
+    player.allies=player.allies||[]; enemy.allies=enemy.allies||[];
+    if(player.allies.includes(enemy.id)){ addEvent(`🤝 ${player.name} đã là đồng minh của ${enemy.name}.`); return; }
+    const atWar=game.wars.some(w=>(w.a===player.id&&w.b===enemy.id)||(w.a===enemy.id&&w.b===player.id));
+    if(atWar){ addEvent(`⚠️ Không thể kết minh khi đang giao tranh với ${enemy.name}.`); return; }
+    if(!confirm(`Gửi đề nghị kết minh tới ${enemy.name}?`)) return;
+    if(Math.random()<0.55){
+        player.allies.push(enemy.id); enemy.allies.push(player.id);
+        addEvent(`🤝 ${enemy.name} chấp thuận lời đề nghị kết minh của ${player.name}!`,true);
+        playSfx("alliance");
+    } else {
+        addEvent(`❌ ${enemy.name} từ chối lời đề nghị kết minh của ${player.name}.`);
+    }
+    closeSettlementModal(); update(); start();
+}
+
+/* ---------------------------- CHỌN NGƯỜI KẾ VỊ CHO VƯƠNG QUỐC NGƯỜI CHƠI (V6.0) ---------------------------- */
+function queueHeirChoice(c){
+    if(game.pendingHeirChoice) return;
+    game.pendingHeirChoice={countryId:c.id};
+    stop();
+    const k=c.court.king;
+    const dynastyName=k.dynasty||k.name.split(" ")[0];
+    const heirCandidate={ name:`${dynastyName} ${pick(LEADER_GIVEN)}`, title:k.title, kind:"dynasty" };
+    const official=pick(c.court.officials)||{name:randomLeaderName(),title:"Đại thần"};
+    const officialCandidate={ name:official.name, title:pick(COUNTRY_TITLES), kind:"official" };
+    game.heirCandidates=[heirCandidate,officialCandidate];
+    const sub=document.getElementById("heirChoiceSub");
+    if(sub) sub.textContent=`${k.title} ${k.name} băng hà sau ${game.year-k.reignStart} năm trị vì. Anh chọn ai kế vị ngai vàng ${c.name}?`;
+    const list=document.getElementById("heirChoiceList");
+    if(list){
+        list.innerHTML=game.heirCandidates.map((h,i)=>`<button class="heir-candidate-btn" data-idx="${i}">${h.title} ${h.name} — ${h.kind==="dynasty"?"Hoàng tộc":"Đại thần có công"}</button>`).join("");
+        list.querySelectorAll(".heir-candidate-btn").forEach(btn=>btn.addEventListener("click",()=>chooseHeir(Number(btn.dataset.idx))));
+    }
+    document.getElementById("heirChoiceModal")?.classList.remove("hidden");
+    playSfx("alert");
+}
+function chooseHeir(idx){
+    const prop=game.pendingHeirChoice;
+    const c=prop?getCountry(prop.countryId):null;
+    const cand=(game.heirCandidates||[])[idx];
+    if(c && cand){
+        const oldName=c.court.king.name, oldTitle=c.court.king.title;
+        const newKing={ name:cand.name, title:cand.kind==="dynasty"?oldTitle:cand.title, age:cand.kind==="dynasty"?ri(18,32):ri(28,50), reignStart:game.year, dynasty:cand.kind==="dynasty"?(c.court.king.dynasty||oldName.split(" ")[0]):cand.name.split(" ")[0] };
+        c.court.king=newKing; c.leader=newKing;
+        addEvent(`👑 ${oldTitle} ${oldName} băng hà. Theo ý chỉ của anh, ${newKing.title} ${newKing.name} (${cand.kind==="dynasty"?"hoàng tộc":"đại thần"}) kế vị ngai vàng ${c.name}.`,true);
+        playSfx("coronation");
+    }
+    game.pendingHeirChoice=null; game.heirCandidates=null;
+    document.getElementById("heirChoiceModal")?.classList.add("hidden");
     update(); start();
 }
 
@@ -1402,8 +1569,85 @@ function handleCanvasClick(e){
     if(bestS) openSettlementModal(bestS);
 }
 
+/* ---------------------------- ÂM THANH: NHẠC NỀN & HIỆU ỨNG (V6.0) ----------------------------
+ * Toàn bộ âm thanh được tổng hợp trực tiếp bằng Web Audio API (không cần file .mp3 bên ngoài),
+ * gồm 1 lớp nhạc nền êm dịu phát nền liên tục + các hiệu ứng ngắn cho sự kiện quan trọng. */
+let audioCtx=null, musicNodes=null, musicPlaying=false, audioMuted=false;
+function ensureAudioCtx(){
+    if(!audioCtx){
+        try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ audioCtx=null; }
+    }
+    if(audioCtx && audioCtx.state==="suspended") audioCtx.resume();
+    return audioCtx;
+}
+const SFX_PATTERNS={
+    war:        [{f:110,d:.35,type:"sawtooth"},{f:82,d:.4,type:"sawtooth",delay:.09}],
+    peace:      [{f:520,d:.22,type:"sine"},{f:660,d:.3,type:"sine",delay:.12}],
+    alliance:   [{f:440,d:.16,type:"triangle"},{f:660,d:.2,type:"triangle",delay:.1},{f:880,d:.32,type:"triangle",delay:.2}],
+    coronation: [{f:392,d:.2,type:"triangle"},{f:523.25,d:.2,type:"triangle",delay:.12},{f:659.25,d:.4,type:"triangle",delay:.24}],
+    alert:      [{f:300,d:.14,type:"square"},{f:300,d:.14,type:"square",delay:.22}],
+    click:      [{f:700,d:.05,type:"sine"}],
+    found:      [{f:330,d:.18,type:"triangle"},{f:415.3,d:.18,type:"triangle",delay:.1},{f:493.88,d:.18,type:"triangle",delay:.2},{f:659.25,d:.45,type:"triangle",delay:.32}]
+};
+function playSfx(type){
+    if(audioMuted) return;
+    const ctx=ensureAudioCtx(); if(!ctx) return;
+    const now=ctx.currentTime;
+    const master=ctx.createGain(); master.gain.value=0.16; master.connect(ctx.destination);
+    const seq=SFX_PATTERNS[type]||SFX_PATTERNS.click;
+    for(const note of seq){
+        const osc=ctx.createOscillator(), gain=ctx.createGain();
+        osc.type=note.type; osc.frequency.value=note.f;
+        const t0=now+(note.delay||0);
+        gain.gain.setValueAtTime(0,t0);
+        gain.gain.linearRampToValueAtTime(1,t0+.02);
+        gain.gain.exponentialRampToValueAtTime(.001,t0+note.d);
+        osc.connect(gain); gain.connect(master);
+        osc.start(t0); osc.stop(t0+note.d+.05);
+    }
+}
+function startMusic(){
+    if(audioMuted) return;
+    const ctx=ensureAudioCtx(); if(!ctx||musicPlaying) return;
+    musicPlaying=true;
+    const master=ctx.createGain(); master.gain.value=0.05; master.connect(ctx.destination);
+    const padFreqs=[130.81,164.81,196.0,246.94]; // hợp âm nền êm dịu (Cm)
+    const oscs=[];
+    padFreqs.forEach((f,i)=>{
+        const osc=ctx.createOscillator(); osc.type="sine"; osc.frequency.value=f;
+        const g=ctx.createGain(); g.gain.value=0;
+        osc.connect(g); g.connect(master); osc.start();
+        const lfo=ctx.createOscillator(); lfo.frequency.value=0.05+i*0.015;
+        const lfoGain=ctx.createGain(); lfoGain.gain.value=0.025;
+        lfo.connect(lfoGain); lfoGain.connect(g.gain); lfo.start();
+        g.gain.setTargetAtTime(0.55/padFreqs.length,ctx.currentTime,2.5);
+        oscs.push({osc,g,lfo});
+    });
+    musicNodes={master,oscs};
+}
+function stopMusic(){
+    if(!musicPlaying||!musicNodes||!audioCtx) return;
+    const ctx=audioCtx;
+    musicNodes.oscs.forEach(({osc,g,lfo})=>{
+        try{ g.gain.setTargetAtTime(0,ctx.currentTime,0.35); osc.stop(ctx.currentTime+1.2); lfo.stop(ctx.currentTime+1.2); }catch(e){}
+    });
+    musicPlaying=false; musicNodes=null;
+}
+function toggleAudio(){
+    audioMuted=!audioMuted;
+    if(audioMuted) stopMusic(); else startMusic();
+    updateAudioButton();
+}
+function updateAudioButton(){
+    const btn=document.getElementById("audioToggle");
+    if(btn) btn.textContent=audioMuted?"🔇":"🔊";
+}
+
 function setup(){
-    document.getElementById("startButton")?.addEventListener("click",()=>showScreen("setupScreen"));
+    document.getElementById("startButton")?.addEventListener("click",()=>{ startMusic(); playSfx("click"); showScreen("setupScreen"); });
+    document.getElementById("audioToggle")?.addEventListener("click",toggleAudio);
+    document.getElementById("acceptWarButton")?.addEventListener("click",()=>resolveWarProposal(true));
+    document.getElementById("declineWarButton")?.addEventListener("click",()=>resolveWarProposal(false));
     document.getElementById("backToIntro")?.addEventListener("click",()=>showScreen("introScreen"));
     const pop=document.getElementById("populationInput"),popValue=document.getElementById("populationValue");
     pop?.addEventListener("input",()=>{ popValue.textContent=pop.value; });
