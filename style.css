@@ -17,6 +17,20 @@
 .modal-court-title{margin:14px 0 4px;font-size:10px;letter-spacing:2px;color:#71869d;border-top:1px solid #1c2b3d;padding-top:12px}
 @media(max-width:700px){.settlement-modal-card{padding:22px 18px 16px}}
 
+/* ---- Ngoại giao & âm thanh (V6.0) ---- */
+.topbar-right{display:flex;align-items:center;gap:14px}
+.audio-toggle{width:38px;height:38px;padding:0;border-radius:50%;font-size:16px;background:#142338;border:1px solid #2b4057;color:#e7eef6}
+.audio-toggle:hover{background:#1c334e;border-color:#46627f}
+.modal-diplomacy-actions{display:flex;gap:8px;margin:14px 0 4px}
+.modal-diplomacy-actions button{margin:0;font-size:10.5px}
+.danger-button{background:#5a2027!important;border-color:#8a3540!important;color:#ffdede!important}
+.danger-button:hover{background:#712a33!important;border-color:#c25a63!important}
+.danger-button:disabled{opacity:.5;cursor:default}
+.ally-button{background:#1e3a2c!important;border-color:#3d6b4d!important;color:#dcf5e6!important}
+.ally-button:hover{background:#28513a!important;border-color:#5c9a76!important}
+.ally-button:disabled{opacity:.5;cursor:default}
+.heir-candidate-btn{text-align:left;font-weight:bold;letter-spacing:.3px}
+
 /* ---- Thu phóng bản đồ (V1.0) ---- */
 #worldCanvas{cursor:grab;touch-action:none}
 .zoom-controls{position:absolute;top:16px;right:16px;display:flex;flex-direction:column;gap:6px;z-index:5}
