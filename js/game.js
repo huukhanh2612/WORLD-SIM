@@ -2,11 +2,12 @@
  * WORLD-SIM — A living world simulation
  * Copyright © 2026 PHAN HỮU KHÁNH
  * All rights reserved.
- * V3.0 — Tài nguyên đa dạng, dân làng khai thác có mục đích, triều đình nhiều chức vị & truyền ngôi.
+ * V5.0 — Bỏ chu kỳ ngày/đêm, chọn làng chủ lực, lập vương quốc/chư hầu & ENDGAME,
+ *        máy bắn đá (gỗ) & súng (kim cương), quân dịch bắt buộc 1/3 dân số.
  */
 
 const OWNER = "PHAN HỮU KHÁNH";
-const VERSION = "V4.0";
+const VERSION = "V5.0";
 
 const game = {
     year: 1, worldName: "THẾ GIỚI", mapResources: 0, initialMapResources: 0,
@@ -15,11 +16,11 @@ const game = {
     settings: { population: 100, resources: 1, climate: "temperate", mapType: "continent" },
     timer: null, generation: 1, nextPerson: 1, nextSettlement: 1, nextCountry: 1, nextWar: 1,
     weather: { type: "clear", years: 0 }, selectedSettlement: null, dt: 0.04, animClock: 0,
-    // Chu kỳ ngày & đêm (V4.0) — thời gian trôi chậm, mỗi năm có nhiều ngày/đêm
-    dayClock: 0, dayCycleLength: 60, dayFraction: 0.64, isDaytime: true,
     // Thu phóng bản đồ (V4.0)
     view: { zoom: 1, ox: 0, oy: 0 },
-    scarcityRatio: 1
+    scarcityRatio: 1,
+    // Làng chủ lực của người chơi & vương quốc (V5.0)
+    playerSettlement: null, playerCountry: null, awaitingPlayerChoice: false, awaitingKingdomChoice: false
 };
 
 const SETTLEMENT_NAMES = ["An Lạc","Bình Minh","Hòa Sơn","Thanh Hà","Phú An","Tân Lộc","Minh Châu","Vạn Phúc","Nam Sơn","Đông Hải","Trường An","Thiên Phúc","Đại Sơn","Thịnh Vượng","Hải Bình"];
@@ -117,11 +118,15 @@ const ASSET_PATHS = {
     mountain:   "assets/environment/mountain.png",
     villager:   "assets/characters/villager_sheet.png",
     federation: "assets/federations/federation.png",
-    gate:       "assets/landmarks/village_gate.png"
+    gate:       "assets/landmarks/village_gate.png",
+    soldier:    "assets/soldier/soldier_sheet.png",
+    catapult:   "assets/catapults/catapults.png"
 };
 const ASSETS = {};
 let assetsReady = false;
 const VILLAGER_SHEET_COLS = 4, VILLAGER_SHEET_ROWS = 4; // 4 khung hoạt ảnh x 4 hướng (xuống/trái/phải/lên)
+const SOLDIER_SHEET_COLS = 4, SOLDIER_SHEET_ROWS = 4;   // lính: 4 khung hoạt ảnh x 4 hướng, cùng bố cục villager
+const CATAPULT_SHEET_COLS = 4, CATAPULT_SHEET_ROWS = 4; // máy bắn đá: lưới 4x4 khung hoạt ảnh bắn đá
 
 function imgReady(img){ return !!(img && img.complete && img.naturalWidth > 0); }
 
@@ -293,7 +298,6 @@ function drawWorld(){
     }
 
     game.animClock=(game.animClock||0)+dt;
-    updateDayNightCycle(dt);
     updateGatherTasks(dt);
 
     // Sông chân thực
@@ -420,12 +424,24 @@ function drawWorld(){
             sx*=w; sy*=h;
             let jitterX = Math.sin(i*452)*4; let jitterY = Math.cos(i*213)*4;
             
-            ctx.fillStyle = (i%2===0) ? a.color : b.color;
+            const side = (i%2===0) ? a : b;
+            ctx.fillStyle = side.color;
             ctx.beginPath(); ctx.arc(sx+jitterX, sy+jitterY, 1.3, 0, Math.PI*2); ctx.fill();
-            
+
             if(t>0.4 && t<0.6 && Math.random()<0.08) {
-                ctx.fillStyle = "#ff5500"; ctx.beginPath(); ctx.arc(sx+jitterX, sy+jitterY, 2.5, 0, Math.PI*2); ctx.fill();
-                ctx.fillStyle = "#ffcc00"; ctx.beginPath(); ctx.arc(sx+jitterX, sy+jitterY, 1.5, 0, Math.PI*2); ctx.fill();
+                const hasGuns=(side.totalGuns||0)>0, hasCatapults=(side.totalCatapults||0)>0;
+                if(hasGuns){
+                    // Súng: chớp lửa nhỏ, sắc gọn, màu trắng-vàng
+                    ctx.fillStyle = "#fff6d0"; ctx.beginPath(); ctx.arc(sx+jitterX, sy+jitterY, 1.8, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = "#e0c24a"; ctx.beginPath(); ctx.arc(sx+jitterX, sy+jitterY, 0.9, 0, Math.PI*2); ctx.fill();
+                } else if(hasCatapults){
+                    // Máy bắn đá: mảnh đá bay tạo vệt nổ nâu-cam lớn hơn
+                    ctx.fillStyle = "#c97b3d"; ctx.beginPath(); ctx.arc(sx+jitterX, sy+jitterY, 3, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = "#8c5a35"; ctx.beginPath(); ctx.arc(sx+jitterX, sy+jitterY, 1.6, 0, Math.PI*2); ctx.fill();
+                } else {
+                    ctx.fillStyle = "#ff5500"; ctx.beginPath(); ctx.arc(sx+jitterX, sy+jitterY, 2.5, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = "#ffcc00"; ctx.beginPath(); ctx.arc(sx+jitterX, sy+jitterY, 1.5, 0, Math.PI*2); ctx.fill();
+                }
             }
         }
     }
@@ -470,6 +486,23 @@ function drawWorld(){
             }
         }
         if(game.selectedSettlement===s.id){ ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(x,y,R+6,0,Math.PI*2); ctx.stroke(); }
+
+        // Máy bắn đá đóng quanh làng nếu làng đã chế tạo được (V5.0)
+        if(s.catapults>0){
+            const shown=Math.min(3,s.catapults);
+            for(let i=0;i<shown;i++){
+                const ang=Math.PI*0.6+i*0.5, cx2=x+Math.cos(ang)*(R+9), cy2=y+Math.sin(ang)*(R+5);
+                if(imgReady(ASSETS.catapult)){
+                    const fw=ASSETS.catapult.naturalWidth/CATAPULT_SHEET_COLS, fh=ASSETS.catapult.naturalHeight/CATAPULT_SHEET_ROWS;
+                    const col=Math.floor(game.animClock*3+i)%CATAPULT_SHEET_COLS, row=0;
+                    const size=9;
+                    ctx.drawImage(ASSETS.catapult, col*fw, row*fh, fw, fh, cx2-size/2, cy2-size/2, size, size);
+                } else {
+                    ctx.fillStyle="#a9793f"; ctx.fillRect(cx2-2,cy2-1,4,2); ctx.strokeStyle="#6b4d28"; ctx.lineWidth=1;
+                    ctx.beginPath(); ctx.moveTo(cx2-2,cy2); ctx.lineTo(cx2+2,cy2-3); ctx.stroke();
+                }
+            }
+        }
     }
 
     // Người dân (Chặn di chuyển trên biển)
@@ -493,15 +526,19 @@ function drawWorld(){
         } // Dân đang đi khai thác được updateGatherTasks() di chuyển riêng theo mục đích
 
         const x=p.x*w, y=p.y*h, c=p.country?getCountry(p.country):null;
-        if(imgReady(ASSETS.villager)){
-            const fw=ASSETS.villager.naturalWidth/VILLAGER_SHEET_COLS, fh=ASSETS.villager.naturalHeight/VILLAGER_SHEET_ROWS;
-            const row=clamp(p.dir||0,0,VILLAGER_SHEET_ROWS-1);
-            const col=Math.floor(game.animClock*6)%VILLAGER_SHEET_COLS;
-            const size=p.role==="soldier"?12:9.5;
-            ctx.drawImage(ASSETS.villager, col*fw, row*fh, fw, fh, x-size/2, y-size*0.92, size, size);
+        const isSoldier=p.role==="soldier";
+        const sheet=isSoldier&&imgReady(ASSETS.soldier)?ASSETS.soldier:ASSETS.villager;
+        const cols=isSoldier&&sheet===ASSETS.soldier?SOLDIER_SHEET_COLS:VILLAGER_SHEET_COLS;
+        const rows=isSoldier&&sheet===ASSETS.soldier?SOLDIER_SHEET_ROWS:VILLAGER_SHEET_ROWS;
+        if(imgReady(sheet)){
+            const fw=sheet.naturalWidth/cols, fh=sheet.naturalHeight/rows;
+            const row=clamp(p.dir||0,0,rows-1);
+            const col=Math.floor(game.animClock*6)%cols;
+            const size=isSoldier?12:9.5;
+            ctx.drawImage(sheet, col*fw, row*fh, fw, fh, x-size/2, y-size*0.92, size, size);
             if(c){ ctx.fillStyle=c.color; ctx.fillRect(x-1.5,y-0.6,3,1.6); }
         } else {
-            ctx.fillStyle = c?c.color:"#8f7966"; ctx.fillRect(x-1,y,2,3);
+            ctx.fillStyle = c?c.color:(isSoldier?"#7a3c3c":"#8f7966"); ctx.fillRect(x-1,y,2,3);
             ctx.fillStyle = "#fcd5ba"; ctx.beginPath(); ctx.arc(x,y-1.5,1.5,0,Math.PI*2); ctx.fill();
         }
 
@@ -525,32 +562,8 @@ function drawWorld(){
         const c=getCountry(s.country); if(c&&c.capital===s.id){ ctx.font="bold 12px Arial"; ctx.fillStyle=c.color; ctx.fillText(c.name,s.x*w,s.y*h+21); ctx.font="11px Arial"; }
     }
 
-    ctx.restore(); // kết thúc vùng vẽ có thu phóng — mây, thời tiết, ngày/đêm vẽ phủ toàn màn hình không zoom
-    drawClouds(w,h,dt); drawWeatherOverlay(w,h,dt); drawDayNightOverlay(w,h);
-}
-
-function drawDayNightOverlay(w,h){
-    // Độ tối ban đêm biến thiên mượt theo vị trí trong chu kỳ ngày/đêm
-    const cycleLen=game.dayCycleLength||60;
-    const daySplit=cycleLen*(game.dayFraction||0.64);
-    const nightLen=cycleLen-daySplit;
-    const cyclePos=(game.dayClock||0)%cycleLen;
-    let darkness=0;
-    const fade=Math.min(daySplit,nightLen)*0.28;
-    if(cyclePos>=daySplit-fade && cyclePos<daySplit+fade){ darkness=(cyclePos-(daySplit-fade))/(fade*2); } // hoàng hôn
-    else if(cyclePos>=daySplit+fade && cyclePos<cycleLen-fade){ darkness=1; } // đêm sâu
-    else if(cyclePos>=cycleLen-fade){ darkness=1-((cyclePos-(cycleLen-fade))/(fade*2)); } // bình minh
-    darkness=clamp(darkness,0,1)*0.62;
-    if(darkness>0.01){
-        ctx.fillStyle=`rgba(4,8,22,${darkness})`; ctx.fillRect(0,0,w,h);
-        if(darkness>0.35){
-            ctx.save(); ctx.globalAlpha=(darkness-0.35)*1.4;
-            ctx.fillStyle="#eef3fb";
-            for(let i=0;i<50;i++){ const sx=(i*97.13)%1*w, sy=(i*53.7)%1*h*0.6; ctx.fillRect(sx,sy,1,1); }
-            ctx.beginPath(); ctx.arc(w*0.88,h*0.14,10,0,Math.PI*2); ctx.fill();
-            ctx.restore();
-        }
-    }
+    ctx.restore(); // kết thúc vùng vẽ có thu phóng — mây, thời tiết vẽ phủ toàn màn hình không zoom
+    drawClouds(w,h,dt); drawWeatherOverlay(w,h,dt);
 }
 
 function drawClouds(w,h,dt){
@@ -594,34 +607,6 @@ function drawWeatherOverlay(w,h,dt){
     }
 }
 
-/* ---- Chu kỳ ngày & đêm (V4.0) — thời gian trôi chậm hơn, ban ngày ra khai thác, ban đêm về làng ---- */
-function updateDayNightCycle(dt){
-    game.dayClock=(game.dayClock||0)+dt;
-    const daySplit=game.dayCycleLength*(game.dayFraction||0.64);
-    const cyclePos=game.dayClock%game.dayCycleLength;
-    const wasDaytime=game.isDaytime;
-    game.isDaytime = cyclePos<daySplit;
-    if(wasDaytime && !game.isDaytime){
-        // Trời vừa tối: dân đang khai thác dở phải thu dọn quay về làng ngay
-        for(const p of game.population){
-            if(!p.alive || !p.task) continue;
-            if(p.task.phase==="mining" || p.task.phase==="moving"){
-                p.task.phase="returning";
-                const home=getSettlement(p.home);
-                if(home){ p.tx=clamp(home.x+rnd(-.01,.01),.02,.98); p.ty=clamp(home.y+rnd(-.01,.01),.02,.98); }
-            }
-        }
-    }
-    if(!game.isDaytime && Math.random()<0.4){
-        // Ban đêm: người nhàn rỗi thong thả đi về phía làng của mình thay vì lang thang xa
-        for(const p of alive()){
-            if(p.task || !p.settlement) continue;
-            const home=getSettlement(p.settlement);
-            if(home && dist(p,home)>.04){ p.tx=clamp(home.x+rnd(-.015,.015),.02,.98); p.ty=clamp(home.y+rnd(-.015,.015),.02,.98); }
-        }
-    }
-}
-
 /* ---------------------------- MÔ PHỎNG ---------------------------- */
 
 function randomLandPoint(){
@@ -639,7 +624,8 @@ function createWorld(){
     game.selectedSettlement=null; game.animClock=0;
     game.weather={type:"clear",years:0}; game.clouds=[]; game.rainDrops=[];
     game.depletedNotified=false; game.scarcityWarned=false;
-    game.dayClock=0; game.isDaytime=true; game.view={zoom:1,ox:0,oy:0};
+    game.view={zoom:1,ox:0,oy:0};
+    game.playerSettlement=null; game.playerCountry=null; game.awaitingPlayerChoice=false; game.awaitingKingdomChoice=false; game.kingdomChoiceNextThreshold=0;
 
     game.settlementTarget=ri(3,7); game.firstCountryYear=ri(55,100); game.secondCountryYear=ri(115,175);
     game.expansionYear=ri(190,260); game.warEligibleYear=ri(130,190); game.majorWarYear=ri(210,275);
@@ -673,6 +659,8 @@ function simulateYear(){
     simulateAlliances(); // Kết minh / tan rã liên minh giữa các quốc gia
     simulateWars();
     generateHistory();
+    checkPlayerKingdomOpportunity();
+    checkPlayerCountryCollapse();
 }
 
 function simulateWeather(){
@@ -732,7 +720,6 @@ function simulatePeople(){
 function assignGatherTasks(){
     const nodes=game.terrain.resourceNodes;
     if(!nodes || !nodes.length) return;
-    if(!game.isDaytime) return; // Ban đêm không cử thêm người đi khai thác
     for(const s of game.settlements){
         if(!s.stock) s.stock={wood:0,iron:0,copper:0,gold:0,diamond:0};
         const workingNow=game.population.filter(p=>p.alive&&p.settlement===s.id&&p.task).length;
@@ -788,7 +775,7 @@ function updateGatherTasks(dt){
             if(t.timer>=t.duration){
                 const node=nodes&&nodes.find(n=>n.nodeId===t.nodeId);
                 const s=getSettlement(p.settlement);
-                let yieldAmt=ri(6,18)*(s?(1+(s.tech||1)*0.15):1);
+                let yieldAmt=ri(6,18)*(s?(1+(s.tech||1)*0.15):1)*(s?(s.gatherMultiplier||1):1);
                 if(node){
                     yieldAmt=Math.min(yieldAmt,node.amount||0);
                     node.amount=Math.max(0,(node.amount||0)-yieldAmt);
@@ -831,6 +818,34 @@ function simulateEconomy() {
             s.stock.copper=(s.stock.copper||0)-copperUse;
             s.military += (ironUse*1.2+copperUse*1.6)*(1+s.tech*0.15);
         }
+
+        // Máy bắn đá: chế tạo từ Gỗ dự trữ dồi dào (V5.0)
+        if(s.catapults===undefined) s.catapults=0;
+        const woodStock=s.stock.wood||0;
+        if(woodStock>=250){
+            const woodUse=Math.floor(woodStock*0.06);
+            const built=Math.floor(woodUse/180);
+            if(built>0){
+                s.stock.wood-=built*180;
+                s.catapults+=built;
+                s.military+=built*35;
+                if(Math.random()<0.5) addEvent(`🏗️ ${s.name} dùng gỗ dự trữ dựng thêm ${built} máy bắn đá.`);
+            }
+        }
+
+        // Súng: chế tạo từ Kim cương quý hiếm (V5.0)
+        if(s.guns===undefined) s.guns=0;
+        const diamondStock=s.stock.diamond||0;
+        if(diamondStock>=3){
+            const diamondUse=Math.floor(diamondStock*0.2);
+            if(diamondUse>0){
+                s.stock.diamond-=diamondUse;
+                s.guns+=diamondUse;
+                s.military+=diamondUse*55;
+                addEvent(`🔫 ${s.name} khai thác kim cương chế tạo được ${diamondUse} khẩu súng, sức mạnh quân sự tăng vọt.`,true);
+            }
+        }
+
         s.resources=settlementWealth(s);
     }
     const nodes=game.terrain.resourceNodes;
@@ -853,17 +868,17 @@ function makeSettlement(base){
         x:base.x, y:base.y, population:0, age:0, country:null,
         leader:{name:randomLeaderName(),title:pick(VILLAGE_TITLES)},
         tech:1, territory:.045, founded:game.year, conquests:0,
-        stock:{wood:80,iron:20,copper:10,gold:2,diamond:0}, resources:130, military: 10, soldiers: 0 // Khởi tạo ban đầu
+        stock:{wood:80,iron:20,copper:10,gold:2,diamond:0}, resources:130, military: 10, soldiers: 0, // Khởi tạo ban đầu
+        gatherMultiplier:1, catapults:0, guns:0 // V5.0: sức thu thập & khí tài công thành
     };
 }
 
 // ---- Tuyển quân: dân thường trở thành binh lính dựa trên khí tài sẵn có (V4.0) ----
 function simulateMilitaryTraining(){
+    // Quy định bắt buộc: cứ 3 người dân làng phải có 1 lính (V5.0)
     for(const s of game.settlements){
         if(s.soldiers===undefined) s.soldiers=0;
-        const maxBySize=Math.floor(s.population*0.28);
-        const maxByGear=Math.floor((s.military||0)/9);
-        const target=clamp(Math.min(maxBySize,maxByGear),0,s.population);
+        const target=clamp(Math.floor(s.population/3),0,s.population);
         if(s.soldiers<target){
             const need=Math.min(target-s.soldiers, ri(1,3));
             const recruits=game.population.filter(p=>p.alive&&p.settlement===s.id&&p.role==="civilian"&&p.age>=16&&p.age<=50&&!p.task).slice(0,need);
@@ -889,6 +904,9 @@ function simulateSettlements(){
             s.population=alive().filter(p=>p.settlement===s.id).length;
             addEvent(`🏘️ ${s.name} được hình thành, bắt đầu khai thác gỗ và đá xây dựng làng.`,true);
         }
+    }
+    if(game.settlements.length>=2 && !game.playerSettlement && !game.awaitingPlayerChoice){
+        triggerVillageChoice();
     }
     for(const s of game.settlements){
         s.age++; s.population=alive().filter(p=>p.settlement===s.id).length;
@@ -944,8 +962,10 @@ function simulateRaids(){
             if(target.population<4){
                 for(const p of alive()) if(p.settlement===target.id) { p.settlement=s.id; p.tx=s.x; p.ty=s.y; if(p.task) p.home=s.id; }
                 for(const k of RESOURCE_TYPES) s.stock[k]=(s.stock[k]||0)+(target.stock?.[k]||0);
-                s.military += target.military; s.resources=settlementWealth(s);
+                s.military += target.military; s.catapults=(s.catapults||0)+(target.catapults||0); s.guns=(s.guns||0)+(target.guns||0);
+                s.resources=settlementWealth(s);
                 game.settlements=game.settlements.filter(x=>x.id!==target.id);
+                if(game.playerSettlement===target.id) game.playerSettlement=null;
                 addEvent(`🏚️ ${target.name} bị xóa sổ. Của cải thuộc về ${s.name}.`,true);
             }
             if(s.conquests>=2 && !s.country && Math.random()<.6) createCountry(s);
@@ -975,6 +995,8 @@ function formCountries(){
         c.totalResources = sList.reduce((n,s)=>n+s.resources,0);
         c.totalMilitary = sList.reduce((n,s)=>n+s.military,0);
         c.totalSoldiers = sList.reduce((n,s)=>n+(s.soldiers||0),0);
+        c.totalCatapults = sList.reduce((n,s)=>n+(s.catapults||0),0);
+        c.totalGuns = sList.reduce((n,s)=>n+(s.guns||0),0);
         c.civilians = Math.max(0,c.population-c.totalSoldiers);
         c.power= c.population*0.4 + c.totalMilitary*0.6; // Sức mạnh quốc gia phụ thuộc lớn vào Khí tài
     }
@@ -1065,7 +1087,8 @@ function simulateAlliances(){
 // Sức mạnh tổng hợp: binh lính + tài nguyên của quốc gia, cộng thêm hỗ trợ từ đồng minh
 function warPower(country, opponentId){
     if(!country) return 0;
-    let p=(country.totalSoldiers||0)*3 + (country.totalResources||0)*0.04 + (country.totalMilitary||0)*0.3;
+    let p=(country.totalSoldiers||0)*3 + (country.totalResources||0)*0.04 + (country.totalMilitary||0)*0.3
+        + (country.totalCatapults||0)*18 + (country.totalGuns||0)*45; // máy bắn đá & súng nâng cao đáng kể sức chiến đấu
     for(const allyId of (country.allies||[])){
         if(allyId===opponentId) continue;
         const ally=getCountry(allyId); if(!ally) continue;
@@ -1134,7 +1157,6 @@ function setText(id,value){ const e=document.getElementById(id); if(e) e.textCon
 function update(){
     const a=alive();
     setText("year",game.year); setText("worldName",game.worldName); setText("population",game.population.length);
-    setText("dayPhaseLabel", game.isDaytime?"☀️ BAN NGÀY":"🌙 BAN ĐÊM");
     setText("alive",a.length); setText("settlements",game.settlements.length); setText("countries",game.countries.length); setText("generation",game.generation);
     setText("mapTotalResources", fmt(game.mapResources));
     setText("climateState",game.settings.climate==="dry"?"Khô":game.settings.climate==="wet"?"Ẩm":"Ôn hòa");
@@ -1145,6 +1167,20 @@ function update(){
     setText("workingCount", game.population.filter(p=>p.alive&&p.task).length);
     const soldierCount=a.filter(p=>p.role==="soldier").length;
     setText("totalSoldiers", soldierCount); setText("totalCivilians", a.length-soldierCount);
+    setText("totalCatapults", game.settlements.reduce((n,s)=>n+(s.catapults||0),0));
+    setText("totalGuns", game.settlements.reduce((n,s)=>n+(s.guns||0),0));
+    const kingdomSection=document.getElementById("playerKingdomSection");
+    if(kingdomSection){
+        if(game.playerSettlement){
+            kingdomSection.classList.remove("hidden");
+            const ps=getSettlement(game.playerSettlement);
+            setText("playerVillageName", ps?ps.name:"-");
+            const pc=game.playerCountry?getCountry(game.playerCountry):null;
+            setText("playerCountryName", pc?pc.name:"Chưa lập quốc");
+        } else {
+            kingdomSection.classList.add("hidden");
+        }
+    }
     const forcesBox=document.getElementById("countryForces");
     if(forcesBox){
         forcesBox.innerHTML=game.countries.map(c=>{
@@ -1206,6 +1242,7 @@ function openSettlementModal(s, select=true){
     setModalText("modalResources", fmt(Math.floor(s.resources)));
     setModalText("modalStockDetail", s.stock?RESOURCE_TYPES.map(k=>`${RESOURCE_META[k].icon}${fmt(s.stock[k]||0)}`).join("  "):"—");
     setModalText("modalMilitary", fmt(Math.floor(s.military)));
+    setModalText("modalSiegeWeapons", `🏗️ ${fmt(s.catapults||0)} máy bắn đá  /  🔫 ${fmt(s.guns||0)} súng`);
     setModalText("modalTech", TECH_NAMES[clamp((s.tech||1)-1,0,4)]);
     setModalText("modalConquests", s.conquests?`${s.conquests} lần chinh phục làng khác`:"Chưa từng chinh chiến");
     if(c && c.court){
@@ -1223,6 +1260,109 @@ function openSettlementModal(s, select=true){
     document.getElementById("settlementModal")?.classList.remove("hidden");
 }
 function closeSettlementModal(){ game.selectedSettlement=null; document.getElementById("settlementModal")?.classList.add("hidden"); }
+
+/* ---------------------------- LÀNG CHỦ LỰC CỦA NGƯỜI CHƠI (V5.0) ---------------------------- */
+// Khi thế giới có từ 2 làng trở lên, người chơi bắt buộc phải chọn 1 làng để dẫn dắt.
+// Làng được chọn sẽ có sức thu thập tài nguyên giảm xuống dưới 1/3 so với các làng còn lại.
+function triggerVillageChoice(){
+    game.awaitingPlayerChoice=true;
+    stop(); // tạm dừng mô phỏng chờ người chơi lựa chọn
+    const list=document.getElementById("villageChoiceList");
+    if(list){
+        list.innerHTML=game.settlements.map(s=>`<button class="village-choice-btn" data-id="${s.id}">${s.name} <span style="opacity:.65;font-weight:normal;">(Dân số ${fmt(s.population)})</span></button>`).join("");
+        list.querySelectorAll(".village-choice-btn").forEach(btn=>btn.addEventListener("click",()=>{
+            const id=Number(btn.dataset.id);
+            choosePlayerSettlement(id);
+        }));
+    }
+    document.getElementById("villageChoiceModal")?.classList.remove("hidden");
+}
+function choosePlayerSettlement(id){
+    const s=getSettlement(id);
+    if(!s) return;
+    for(const x of game.settlements) x.gatherMultiplier=1;
+    s.gatherMultiplier=0.3; // dưới 1/3 so với các làng còn lại
+    game.playerSettlement=id;
+    game.awaitingPlayerChoice=false;
+    document.getElementById("villageChoiceModal")?.classList.add("hidden");
+    addEvent(`👤 Anh chọn dẫn dắt ${s.name} làm làng chủ lực của mình. Sức thu thập tài nguyên nơi đây giảm mạnh do dồn lực quản lý.`,true);
+    update(); start();
+}
+
+/* ---------------------------- LẬP VƯƠNG QUỐC / CHƯ HẦU (V5.0) ---------------------------- */
+const KINGDOM_RESOURCE_THRESHOLD=4000;
+function checkPlayerKingdomOpportunity(){
+    if(!game.playerSettlement || game.playerCountry || game.awaitingKingdomChoice) return;
+    const s=getSettlement(game.playerSettlement);
+    if(!s || s.country) return; // đã thuộc quốc gia nào rồi thì thôi
+    const nextThreshold=Math.max(KINGDOM_RESOURCE_THRESHOLD, game.kingdomChoiceNextThreshold||0);
+    if((s.resources||0)>=nextThreshold){
+        triggerKingdomChoice(s);
+    }
+}
+function triggerKingdomChoice(s){
+    game.awaitingKingdomChoice=true;
+    stop();
+    const nearestCountry=game.countries.slice().sort((a,b)=>{
+        const da=Math.min(...a.settlements.map(getSettlement).filter(Boolean).map(z=>dist(s,z)));
+        const db=Math.min(...b.settlements.map(getSettlement).filter(Boolean).map(z=>dist(s,z)));
+        return da-db;
+    })[0];
+    const vassalBtn=document.getElementById("becomeVassalButton");
+    const sub=document.getElementById("kingdomChoiceSub");
+    if(sub) sub.textContent=`${s.name} đã tích lũy ${fmt(s.resources)} tài nguyên — đủ để dựng nghiệp lớn. Anh muốn lập vương quốc riêng, hay làm chư hầu?`;
+    if(vassalBtn){
+        if(nearestCountry){ vassalBtn.disabled=false; vassalBtn.textContent=`LÀM CHƯ HẦU CHO ${nearestCountry.name.toUpperCase()}`; vassalBtn.dataset.countryId=nearestCountry.id; }
+        else { vassalBtn.disabled=true; vassalBtn.textContent="KHÔNG CÓ NƯỚC LÁNG GIỀNG"; }
+    }
+    document.getElementById("kingdomChoiceModal")?.classList.remove("hidden");
+}
+function closeKingdomChoice(){
+    const s=getSettlement(game.playerSettlement);
+    game.kingdomChoiceNextThreshold=(s?s.resources:KINGDOM_RESOURCE_THRESHOLD)+2500;
+    game.awaitingKingdomChoice=false;
+    document.getElementById("kingdomChoiceModal")?.classList.add("hidden");
+    start();
+}
+function foundPlayerKingdom(){
+    const s=getSettlement(game.playerSettlement);
+    if(!s){ closeKingdomChoice(); return; }
+    createCountry(s);
+    const c=getCountry(s.country);
+    if(c){ c.isPlayerCountry=true; game.playerCountry=c.id; addEvent(`👑 Anh xưng vương, lập nên ${c.name}! Từ nay đây là vương quốc của anh.`,true); }
+    game.awaitingKingdomChoice=false;
+    document.getElementById("kingdomChoiceModal")?.classList.add("hidden");
+    update(); start();
+}
+function becomeVassal(countryId){
+    const s=getSettlement(game.playerSettlement);
+    const c=getCountry(countryId);
+    if(!s||!c){ closeKingdomChoice(); return; }
+    s.country=c.id; c.settlements.push(s.id);
+    for(const p of alive()) if(p.settlement===s.id) p.country=c.id;
+    addEvent(`🤝 ${s.name} thần phục ${c.name}, trở thành chư hầu để được bảo hộ.`,true);
+    game.awaitingKingdomChoice=false;
+    document.getElementById("kingdomChoiceModal")?.classList.add("hidden");
+    update(); start();
+}
+
+/* ---------------------------- ENDGAME KHI VƯƠNG QUỐC SỤP ĐỔ (V5.0) ---------------------------- */
+function checkPlayerCountryCollapse(){
+    if(!game.playerCountry) return;
+    const c=getCountry(game.playerCountry);
+    if(!c || !c.settlements || c.settlements.length===0){
+        triggerEndgame(c);
+    }
+}
+function triggerEndgame(lostCountry){
+    stop();
+    const sub=document.getElementById("endgameSubtitle");
+    const detail=document.getElementById("endgameDetail");
+    if(sub) sub.textContent=`Vương quốc ${lostCountry?lostCountry.name:"của anh"} đã diệt vong sau ${game.year} năm tồn tại.`;
+    if(detail) detail.innerHTML=`<p>Mọi làng mạc, binh lính và khí tài đều đã mất về tay đối phương.</p><p>Lịch sử thế giới ${game.worldName} sẽ được viết tiếp bởi những kẻ khác.</p>`;
+    showScreen("endgameScreen");
+    game.playerCountry=null; game.playerSettlement=null;
+}
 
 function handleCanvasClick(e){
     if(!canvas || !canvas.clientWidth) return;
@@ -1254,6 +1394,16 @@ function setup(){
     document.getElementById("clearEvents")?.addEventListener("click",()=>{ game.events=[]; update(); });
     document.getElementById("closeSettlementModal")?.addEventListener("click",closeSettlementModal);
     document.getElementById("settlementModal")?.addEventListener("click",(e)=>{ if(e.target.id==="settlementModal") closeSettlementModal(); });
+    document.getElementById("foundKingdomButton")?.addEventListener("click",foundPlayerKingdom);
+    document.getElementById("becomeVassalButton")?.addEventListener("click",(e)=>{
+        const cid=Number(e.currentTarget.dataset.countryId);
+        if(cid) becomeVassal(cid);
+    });
+    document.getElementById("declineKingdomButton")?.addEventListener("click",closeKingdomChoice);
+    document.getElementById("endgameRestartButton")?.addEventListener("click",()=>{
+        document.getElementById("endgameScreen")?.classList.add("hidden");
+        showScreen("setupScreen");
+    });
     canvas?.addEventListener("click",handleCanvasClick);
     window.addEventListener("resize",resizeCanvas);
     document.addEventListener("keydown",e=>{ if(e.code==="Escape") closeSettlementModal(); });
