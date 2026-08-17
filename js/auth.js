@@ -229,6 +229,12 @@
         Object.assign(game, saved);
         rebuildIsLand(game);
         relinkResourceNodes(game);
+        // (V8.0) Quyền năng thế giới: các thế giới lưu TRƯỚC khi có tính năng này sẽ
+        // không có game.powers trong dữ liệu đã lưu (saved) → bị xóa ở vòng lặp phía
+        // trên → ensurePowersState() sẽ khởi tạo lại mặc định (0 XU, chỉ Sấm Sét mở
+        // sẵn). Với thế giới đã có game.powers, hàm này chỉ chuẩn hóa/bù các khóa còn thiếu.
+        WS.ensurePowersState && WS.ensurePowersState();
+        WS.renderPowersPanel && WS.renderPowersPanel();
         WS.resizeCanvas();
         WS.update();
         WS.drawWorld();
@@ -350,6 +356,10 @@
     }
     ["villageChoiceModal", "kingdomChoiceModal", "warProposalModal", "heirChoiceModal"]
         .forEach(id=>observeHideToggle(id, scheduleImportantSave));
+    // (V8.0) Hệ thống Quyền năng thế giới: game.js phát sự kiện này mỗi khi XU,
+    // quyền năng đã mở khóa, hoặc cooldown Sấm Sét thay đổi — lưu ngay (debounce
+    // 1.2s) để cooldown/XU không bị mất khi F5, đăng xuất, hoặc chuyển thiết bị.
+    window.addEventListener("worldsim:power-changed", ()=>{ if(hasActiveWorld) scheduleImportantSave(); });
     // Một thế giới mới vừa được tạo (nút "BẮT ĐẦU THẾ GIỚI") → lưu ngay lần đầu
     // (currentWorldId đang null vào lúc này nên sẽ tạo một dòng MỚI, không đè lên thế giới khác).
     observeShowToggle("gameScreen", ()=>{ hasActiveWorld = true; scheduleImportantSave(); });
