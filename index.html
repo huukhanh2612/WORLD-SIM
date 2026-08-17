@@ -2,11 +2,27 @@
 <html lang="vi">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><meta name="theme-color" content="#08111f"><title>WORLD-SIM — Thế giới của anh</title><link rel="stylesheet" href="style.css"></head>
 <body>
-<section id="introScreen" class="intro-screen"><div class="intro-content"><div class="intro-symbol">🌍</div><div class="intro-label">MỘT THẾ GIỚI. VÔ HẠN LỊCH SỬ.</div><h1>WORLD-SIM</h1><p class="intro-subtitle">Một thế giới không có câu chuyện được viết sẵn.</p><div class="intro-description"><p>Anh tạo ra thế giới.</p><p>Anh gieo sự sống.</p><p>Còn lịch sử... <strong>để chính họ viết nên.</strong></p></div><button id="startButton" class="start-button">TẠO THẾ GIỚI</button><div class="intro-version">WORLD-SIM · V5.0 Vương Quyền & Khí Tài Chiến Tranh</div><div class="copyright">© 2026 PHAN HỮU KHÁNH · WORLD-SIM</div></div></section>
+<section id="authScreen" class="setup-screen">
+  <div class="setup-card">
+    <div class="setup-symbol">🔐</div>
+    <div class="intro-label">TÀI KHOẢN WORLD-SIM</div>
+    <h2 id="authTitle">Đăng nhập</h2>
+    <label>Email</label>
+    <input id="authEmailInput" type="email" placeholder="ban@vidu.com" autocomplete="username">
+    <label>Mật khẩu</label>
+    <input id="authPasswordInput" type="password" placeholder="Tối thiểu 6 ký tự" autocomplete="current-password">
+    <div id="authStatus" class="auth-status"></div>
+    <button id="authSubmitButton" class="create-world-button">ĐĂNG NHẬP</button>
+    <button id="authToggleModeButton" class="back-button">Chưa có tài khoản? Đăng ký ngay</button>
+    <div class="copyright">© 2026 PHAN HỮU KHÁNH</div>
+  </div>
+</section>
+
+<section id="introScreen" class="intro-screen hidden"><div class="intro-content"><div class="intro-symbol">🌍</div><div class="intro-label">MỘT THẾ GIỚI. VÔ HẠN LỊCH SỬ.</div><h1>WORLD-SIM</h1><p class="intro-subtitle">Một thế giới không có câu chuyện được viết sẵn.</p><div class="intro-description"><p>Anh tạo ra thế giới.</p><p>Anh gieo sự sống.</p><p>Còn lịch sử... <strong>để chính họ viết nên.</strong></p></div><button id="startButton" class="start-button">TẠO THẾ GIỚI</button><div class="intro-version">WORLD-SIM · V5.0 Vương Quyền & Khí Tài Chiến Tranh</div><div class="copyright">© 2026 PHAN HỮU KHÁNH · WORLD-SIM</div></div></section>
 
 <section id="setupScreen" class="setup-screen hidden"><div class="setup-card"><div class="setup-symbol">🌎</div><div class="intro-label">KHỞI TẠO MỘT THẾ GIỚI MỚI</div><h2>Thiết lập thế giới</h2><label>Tên thế giới</label><input id="worldNameInput" type="text" value="Hoàng Đế I" maxlength="30"><label>Số người ban đầu</label><div class="range-row"><input id="populationInput" type="range" min="20" max="300" value="100"><strong id="populationValue">100</strong></div><label>Tài nguyên map</label><div class="choice-row" id="resourceChoices"><button data-value="0.65">Khan hiếm</button><button data-value="1" class="selected">Cân bằng</button><button data-value="1.35">Dồi dào</button></div><label>Khí hậu</label><div class="choice-row" id="climateChoices"><button data-value="dry">Khô</button><button data-value="temperate" class="selected">Ôn hòa</button><button data-value="wet">Ẩm</button></div><label>Loại bản đồ</label><div class="choice-row" id="mapTypeChoices"><button data-value="continent" class="selected">Lục địa</button><button data-value="archipelago">Quần đảo</button><button data-value="pangaea">Đại lục</button><button data-value="desert">Sa mạc</button><button data-value="coastal">Duyên hải</button><button data-value="highlands">Cao nguyên</button></div><button id="createWorldButton" class="create-world-button">BẮT ĐẦU THẾ GIỚI</button><button id="backToIntro" class="back-button">QUAY LẠI</button><div class="copyright">© 2026 PHAN HỮU KHÁNH</div></div></section>
 
-<section id="gameScreen" class="game-screen hidden"><header class="topbar"><div class="brand"><div class="brand-icon">🌍</div><div><div class="game-title">WORLD-SIM</div><div id="worldName" class="world-name">THẾ GIỚI</div></div></div><div class="topbar-right"><button id="audioToggle" class="audio-toggle" title="Bật/tắt âm thanh">🔊</button><div class="year-box"><span>NĂM</span><strong id="year">1</strong></div></div></header><main class="main"><section class="map-area"><canvas id="worldCanvas"></canvas><div class="map-label">BẢN ĐỒ THẾ GIỚI</div><div class="zoom-controls"><button id="zoomIn">+</button><button id="zoomOut">−</button><button id="zoomReset">⤾</button></div><div id="mapHint" class="map-hint">Thế giới đang tự vận động... Nhấp vào làng để xem chi tiết. Cuộn/kéo để phóng to.</div></section><aside class="panel">
+<section id="gameScreen" class="game-screen hidden"><header class="topbar"><div class="brand"><div class="brand-icon">🌍</div><div><div class="game-title">WORLD-SIM</div><div id="worldName" class="world-name">THẾ GIỚI</div></div></div><div class="topbar-right"><div id="saveStatus" class="save-status"></div><button id="logoutButton" class="small-button account-button" title="Đăng xuất">ĐĂNG XUẤT</button><button id="audioToggle" class="audio-toggle" title="Bật/tắt âm thanh">🔊</button><div class="year-box"><span>NĂM</span><strong id="year">1</strong></div></div></header><main class="main"><section class="map-area"><canvas id="worldCanvas"></canvas><div class="map-label">BẢN ĐỒ THẾ GIỚI</div><div class="zoom-controls"><button id="zoomIn">+</button><button id="zoomOut">−</button><button id="zoomReset">⤾</button></div><div id="mapHint" class="map-hint">Thế giới đang tự vận động... Nhấp vào làng để xem chi tiết. Cuộn/kéo để phóng to.</div></section><aside class="panel">
 <section class="panel-section"><h2>TỔNG QUAN</h2><div class="stat"><span>Dân số</span><strong id="population">0</strong></div><div class="stat"><span>Đang sống</span><strong id="alive">0</strong></div><div class="stat"><span>Đang khai thác</span><strong id="workingCount">0</strong></div><div class="stat"><span>Làng</span><strong id="settlements">0</strong></div><div class="stat"><span>Quốc gia</span><strong id="countries">0</strong></div></section>
 <section class="panel-section"><h2>KINH TẾ & MÔI TRƯỜNG</h2><div class="stat"><span>Tài nguyên Map</span><strong id="mapTotalResources" style="color:#d29a4c;">0</strong></div><div class="stat"><span>Chi tiết tài nguyên</span><strong id="mapResourceBreakdown" style="font-size:10.5px;">-</strong></div><div class="stat"><span>Khí hậu</span><strong id="climateState">Ôn hòa</strong></div><div class="stat"><span>Thời tiết</span><strong id="weatherState">☀️ Quang đãng</strong></div><div class="stat"><span>Thế hệ</span><strong id="generation">1</strong></div></section>
 <section class="panel-section"><h2>QUÂN LỰC CÁC QUỐC GIA</h2><div class="stat"><span>Tổng binh lính</span><strong id="totalSoldiers" style="color:#c95b55;">0</strong></div><div class="stat"><span>Tổng dân thường</span><strong id="totalCivilians">0</strong></div><div class="stat"><span>Tổng máy bắn đá</span><strong id="totalCatapults" style="color:#a9793f;">0</strong></div><div class="stat"><span>Tổng súng</span><strong id="totalGuns" style="color:#7fd8e0;">0</strong></div><div id="countryForces" class="events"></div></section>
@@ -117,4 +133,7 @@
   </div>
 </section>
 
-<script src="js/game.js"></script></body></html>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/game.js"></script>
+<script src="js/auth.js"></script>
+</body></html>
