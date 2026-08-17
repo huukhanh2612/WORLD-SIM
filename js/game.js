@@ -564,8 +564,26 @@ function drawWorld(){
         const c=getCountry(s.country); if(c&&c.capital===s.id){ ctx.font="bold 12px Arial"; ctx.fillStyle=c.color; ctx.fillText(c.name,s.x*w,s.y*h+21); ctx.font="11px Arial"; }
     }
 
+    // Hiệu ứng chớp sáng khi Sấm Sét (quyền năng thế giới, V8.0) vừa giáng xuống
+    if(lightningFx){
+        if(Date.now()<lightningFx.until){
+            const fxx=lightningFx.x*w, fxy=lightningFx.y*h;
+            ctx.save();
+            ctx.strokeStyle="#fff6c2"; ctx.lineWidth=3; ctx.lineJoin="round"; ctx.globalAlpha=0.9;
+            ctx.beginPath(); ctx.moveTo(fxx,0);
+            for(let i=1;i<=5;i++){ const by=fxy*(i/5); const bx=fxx+Math.sin(i*37+Date.now()*0.02)*10; ctx.lineTo(bx,by); }
+            ctx.stroke();
+            ctx.globalAlpha=0.3; ctx.fillStyle="#fff6c2";
+            ctx.beginPath(); ctx.arc(fxx,fxy,26,0,Math.PI*2); ctx.fill();
+            ctx.restore();
+        } else {
+            lightningFx=null;
+        }
+    }
+
     ctx.restore(); // kết thúc vùng vẽ có thu phóng — mây, thời tiết vẽ phủ toàn màn hình không zoom
     drawClouds(w,h,dt); drawWeatherOverlay(w,h,dt);
+    tickPowersCooldown(); // (V8.0) đếm ngược hồi chiêu Sấm Sét theo thời gian thực, không phụ thuộc vòng lặp mô phỏng
 }
 
 function drawClouds(w,h,dt){
@@ -629,6 +647,9 @@ function createWorld(){
     game.view={zoom:1,ox:0,oy:0};
     game.playerSettlement=null; game.playerCountry=null; game.awaitingPlayerChoice=false; game.awaitingKingdomChoice=false; game.kingdomChoiceNextThreshold=0;
     game.pendingWarProposal=null; game.pendingHeirChoice=null; game.heirCandidates=null;
+    // (V8.0) Quyền năng thế giới: mỗi thế giới mới bắt đầu lại từ đầu — 0 XU,
+    // chỉ Sấm Sét mở sẵn và sẵn sàng dùng ngay (không hồi chiêu).
+    game.powers={ coins:0, unlocked:{}, lightningNextAt:0 };
 
     game.settlementTarget=ri(8,16); game.firstCountryYear=ri(35,60); game.secondCountryYear=ri(70,110);
     game.expansionYear=ri(90,140); game.warEligibleYear=ri(60,100); game.majorWarYear=ri(120,170);
@@ -650,6 +671,7 @@ function createWorld(){
     for(let i=0;i<game.settings.population;i++){ const p=randomLandPoint(); game.population.push(new Person(game.nextPerson++,p.x,p.y)); }
     addEvent(`Thế giới ${game.worldName} được hình thành với ${fmt(game.mapResources)} đơn vị tài nguyên (gỗ, sắt, đồng, vàng, kim cương) chờ khai phá.`,true);
     closeSettlementModal(); update(); resizeCanvas(); drawWorld(); start();
+    ensurePowersState(); renderPowersPanel();
 }
 
 function start(){ stop(); game.timer=setInterval(()=>{ simulateYear(); update(); }, 5500); }
@@ -1649,9 +1671,230 @@ function setVolume(v){
     updateAudioButton();
 }
 
+/* ----------------------------------------------------------------------
+ * (V8.0) HỆ THỐNG "QUYỀN NĂNG THẾ GIỚI" — Sấm Sét (mở sẵn, hồi chiêu 160s),
+ * Mưa / Lốc Xoáy / Quái Vật / Động Đất (khóa, mở bằng XU), XU QUYỀN NĂNG
+ * và giao diện Rewarded Ads.
+ *
+ * Khối này CHỈ THÊM MỚI — không sửa bất kỳ dòng logic mô phỏng nào ở trên
+ * (dân số, làng, quốc gia, chiến tranh, kế vị...). Toàn bộ trạng thái nằm
+ * trong `game.powers`. Vì js/auth.js lưu/tải NGUYÊN object `game` theo
+ * từng thế giới (buildSnapshot/restoreSnapshot), `game.powers` (XU, các
+ * quyền năng đã mở khóa, thời điểm hồi chiêu Sấm Sét) TỰ ĐỘNG được lưu lên
+ * Supabase và khôi phục đúng khi đăng nhập ở thiết bị khác — không cần sửa
+ * cấu trúc lưu game sẵn có, chỉ cần gọi ensurePowersState()/renderPowersPanel()
+ * sau khi restoreSnapshot() (xem js/auth.js) và phát sự kiện
+ * "worldsim:power-changed" để kích hoạt lưu ngay khi trạng thái thay đổi.
+ * -------------------------------------------------------------------- */
+
+const LIGHTNING_COOLDOWN_MS = 160 * 1000; // 160 giây hồi chiêu, theo yêu cầu — có thể chỉnh nếu cần cân bằng lại
+const AD_REWARD_COINS = 50;               // Số XU nhận được mỗi lần xem trọn quảng cáo Rewarded Ad
+const POWER_DEFS = {
+    rain:       { name:"MƯA",      icon:"🌧️", cost:100 },
+    tornado:    { name:"LỐC XOÁY", icon:"🌪️", cost:250 },
+    monster:    { name:"QUÁI VẬT", icon:"👹", cost:400 },
+    earthquake: { name:"ĐỘNG ĐẤT", icon:"🌋", cost:600 }
+};
+
+// Đảm bảo game.powers luôn tồn tại & hợp lệ — dùng cho thế giới mới, thế giới
+// cũ (chưa từng có hệ thống quyền năng) và sau khi khôi phục từ Supabase.
+function ensurePowersState(){
+    if(!game.powers || typeof game.powers!=="object"){
+        game.powers = { coins:0, unlocked:{}, lightningNextAt:0 };
+    }
+    const p=game.powers;
+    if(typeof p.coins!=="number" || isNaN(p.coins) || p.coins<0) p.coins=0;
+    if(!p.unlocked || typeof p.unlocked!=="object") p.unlocked={};
+    for(const key of Object.keys(POWER_DEFS)) if(typeof p.unlocked[key]!=="boolean") p.unlocked[key]=false;
+    if(typeof p.lightningNextAt!=="number" || isNaN(p.lightningNextAt)) p.lightningNextAt=0;
+    return p;
+}
+
+// Báo cho js/auth.js lưu tiến trình ngay (không chờ chu kỳ autosave 30s) —
+// không đụng tới cơ chế lưu game sẵn có, chỉ phát một sự kiện DOM.
+function notifyPowersChanged(){
+    try{ window.dispatchEvent(new CustomEvent("worldsim:power-changed")); }catch(e){}
+}
+
+let lightningFx=null; // hiệu ứng chớp sáng tạm thời khi vẽ — KHÔNG lưu vào game.powers
+
+// Sấm Sét — miễn phí, hồi chiêu 160s THẬT (mốc thời gian Date.now() lưu vào
+// game.powers.lightningNextAt) nên không reset khi F5 / đăng xuất / đăng
+// nhập ở thiết bị khác. Có tác dụng thật: gây thương vong cho dân làng và
+// thiêu rụi một phần kho gỗ tại một ngôi làng ngẫu nhiên.
+function castLightning(){
+    const p=ensurePowersState();
+    const now=Date.now();
+    if(now < p.lightningNextAt) return false;
+
+    const candidates=game.settlements.filter(s=>s.population>0);
+    if(candidates.length){
+        const s=pick(candidates);
+        const victims=alive().filter(person=>person.settlement===s.id);
+        const hitCount=Math.min(victims.length, ri(1,3));
+        for(let i=0;i<hitCount;i++){
+            const idx=Math.floor(Math.random()*victims.length);
+            const v=victims.splice(idx,1)[0];
+            if(v) v.alive=false;
+        }
+        if(s.stock && s.stock.wood) s.stock.wood=Math.max(0, Math.round(s.stock.wood*(1-rnd(.05,.15))));
+        s.population=alive().filter(person=>person.settlement===s.id).length;
+        addEvent(hitCount>0
+            ? `⚡ Sấm sét giáng xuống ${s.name}! ${hitCount} người dân thiệt mạng, một phần kho gỗ bị thiêu rụi.`
+            : `⚡ Sấm sét giáng xuống ${s.name} nhưng may mắn không gây thương vong.`, true);
+        lightningFx={ x:s.x, y:s.y, until:Date.now()+450 };
+        update();
+    } else {
+        addEvent(`⚡ Sấm sét vang rền khắp thế giới nhưng chưa có ngôi làng nào để giáng xuống.`);
+    }
+
+    p.lightningNextAt=now+LIGHTNING_COOLDOWN_MS;
+    renderPowersPanel();
+    notifyPowersChanged();
+    return true;
+}
+
+function unlockPower(key){
+    const p=ensurePowersState();
+    const def=POWER_DEFS[key];
+    if(!def || p.unlocked[key]) return false;
+    if(p.coins < def.cost) return false;
+    p.coins-=def.cost;
+    p.unlocked[key]=true;
+    addEvent(`🔓 Đã mở khóa quyền năng ${def.icon} ${def.name} bằng ${fmt(def.cost)} XU.`);
+    renderPowersPanel();
+    notifyPowersChanged();
+    return true;
+}
+
+function addPowerCoins(amount){
+    const p=ensurePowersState();
+    const n=Math.max(0, Math.floor(Number(amount)||0));
+    if(n<=0) return;
+    p.coins+=n;
+    renderPowersPanel();
+    notifyPowersChanged();
+}
+
+/* ---- Giao diện Rewarded Ads (sẵn sàng để cắm Ad Network thật vào) ----
+ * Để tích hợp mạng quảng cáo thật (AdMob, Unity Ads, IronSource, v.v.),
+ * chỉ cần GÁN LẠI hàm requestRewardedAd bên dưới từ một <script> nạp SAU
+ * game.js, ví dụ:
+ *
+ *   window.WorldSimAds.requestRewardedAd = function(){
+ *       return new Promise((resolve, reject)=>{
+ *           MyAdNetworkSDK.showRewarded({
+ *               onRewarded: ()=>resolve({ rewarded:true }),
+ *               onClosedWithoutReward: ()=>reject(new Error("AD_CLOSED_EARLY")),
+ *               onFailedToLoad: (e)=>reject(e || new Error("AD_FAILED_TO_LOAD"))
+ *           });
+ *       });
+ *   };
+ *
+ * Hàm PHẢI trả về Promise resolve({rewarded:true}) CHỈ khi người chơi đã
+ * xem trọn quảng cáo và đủ điều kiện nhận thưởng — mọi trường hợp khác
+ * phải reject để KHÔNG cộng XU. Bản mặc định dưới đây KHÔNG giả lập quảng
+ * cáo: nó luôn từ chối vì chưa có Ad Network nào được cấu hình.
+ */
+window.WorldSimAds = window.WorldSimAds || {
+    isConfigured:false,
+    requestRewardedAd:function(){
+        return Promise.reject(new Error("AD_NETWORK_NOT_CONFIGURED"));
+    }
+};
+
+let watchAdInFlight=false;
+async function handleWatchAd(){
+    if(watchAdInFlight) return;
+    const statusEl=document.getElementById("adStatus");
+    const btn=document.getElementById("watchAdButton");
+    watchAdInFlight=true;
+    if(btn) btn.disabled=true;
+    if(statusEl){ statusEl.textContent="Đang tải quảng cáo..."; statusEl.className="power-ad-status"; }
+    try{
+        const result=await window.WorldSimAds.requestRewardedAd();
+        if(result && result.rewarded){
+            addPowerCoins(AD_REWARD_COINS);
+            if(statusEl){ statusEl.textContent=`Đã nhận +${AD_REWARD_COINS} XU!`; statusEl.className="power-ad-status ok"; }
+        } else {
+            if(statusEl){ statusEl.textContent="Chưa xem hết quảng cáo nên không nhận được XU."; statusEl.className="power-ad-status error"; }
+        }
+    } catch(err){
+        const msg=(err && err.message==="AD_NETWORK_NOT_CONFIGURED")
+            ? "Quảng cáo chưa được cấu hình. Vui lòng thử lại sau."
+            : "Không thể tải quảng cáo lúc này. Vui lòng thử lại sau.";
+        if(statusEl){ statusEl.textContent=msg; statusEl.className="power-ad-status error"; }
+    } finally {
+        watchAdInFlight=false;
+        if(btn) btn.disabled=false;
+    }
+}
+
+function renderPowersPanel(){
+    const p=ensurePowersState();
+    const coinsEl=document.getElementById("powerCoinsDisplay");
+    if(coinsEl) coinsEl.textContent=`🪙 XU: ${fmt(p.coins)}`;
+
+    for(const key of Object.keys(POWER_DEFS)){
+        const def=POWER_DEFS[key];
+        const card=document.getElementById("powerCard_"+key);
+        if(!card) continue;
+        const unlocked=!!p.unlocked[key];
+        card.classList.toggle("locked", !unlocked);
+        const statusEl=card.querySelector(".power-status");
+        const actionSlot=card.querySelector(".power-action-slot");
+        if(statusEl){
+            statusEl.textContent = unlocked ? "AVAILABLE" : "🔒 LOCKED";
+            statusEl.classList.toggle("available", unlocked);
+            statusEl.classList.toggle("locked", !unlocked);
+        }
+        if(actionSlot){
+            if(unlocked){
+                actionSlot.innerHTML=`<button class="power-cast-btn" disabled title="Quyền năng này sẽ sớm có tác dụng trong bản cập nhật tiếp theo">SẮP RA MẮT</button>`;
+            } else {
+                const affordable=p.coins>=def.cost;
+                actionSlot.innerHTML=`<button type="button" class="power-unlock-btn" data-power="${key}"${affordable?"":" disabled"}>MỞ KHÓA — ${fmt(def.cost)} XU</button>`;
+            }
+        }
+    }
+    tickPowersCooldown(true);
+}
+
+let lastLightningSecDisplay=null;
+function tickPowersCooldown(force){
+    const p=game.powers; if(!p) return;
+    const remainMs=p.lightningNextAt-Date.now();
+    const remainSec=remainMs>0?Math.ceil(remainMs/1000):0;
+    if(!force && remainSec===lastLightningSecDisplay) return;
+    lastLightningSecDisplay=remainSec;
+    const statusEl=document.getElementById("lightningStatus");
+    const btn=document.getElementById("castLightningButton");
+    if(statusEl){
+        statusEl.textContent = remainSec>0 ? `HỒI CHIÊU: ${remainSec}s` : "AVAILABLE";
+        statusEl.classList.toggle("available", remainSec<=0);
+    }
+    if(btn) btn.disabled = remainSec>0;
+}
+
+function setupPowers(){
+    ensurePowersState();
+    document.getElementById("castLightningButton")?.addEventListener("click", ()=>{ playSfx("click"); castLightning(); });
+    document.getElementById("watchAdButton")?.addEventListener("click", handleWatchAd);
+    document.querySelectorAll(".powers-list").forEach(list=>{
+        list.addEventListener("click",(e)=>{
+            const btn=e.target.closest(".power-unlock-btn");
+            if(!btn || btn.disabled) return;
+            const key=btn.dataset.power;
+            if(key) unlockPower(key);
+        });
+    });
+    renderPowersPanel();
+}
+
 function setup(){
     document.getElementById("startButton")?.addEventListener("click",()=>{ startMusic(); playSfx("click"); showScreen("setupScreen"); });
     document.getElementById("audioToggle")?.addEventListener("click",toggleAudio);
+    setupPowers();
     const volSlider=document.getElementById("volumeSlider");
     if(volSlider){ volSlider.value=Math.round(volumeScale*100); volSlider.addEventListener("input",()=>setVolume(volSlider.value/100)); }
     updateAudioButton();
@@ -1759,5 +2002,7 @@ function frameLoop(ts){
  * -------------------------------------------------------------------- */
 window.WorldSim = {
     game, createWorld, start, stop, update, showScreen, resizeCanvas, drawWorld,
-    closeSettlementModal
+    closeSettlementModal,
+    // (V8.0) Hệ thống Quyền năng thế giới — để js/auth.js khôi phục/đồng bộ đúng sau khi tải thế giới đã lưu
+    ensurePowersState, renderPowersPanel, castLightning, unlockPower, addPowerCoins
 };
