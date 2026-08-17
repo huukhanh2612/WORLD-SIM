@@ -37,3 +37,13 @@
 .zoom-controls button{width:34px;height:34px;padding:0;border-radius:6px;font-size:16px;line-height:1;background:rgba(9,19,33,.75);border:1px solid rgba(255,255,255,.12);color:#e7eef6}
 .zoom-controls button:hover{background:rgba(28,51,78,.9);border-color:#6e8eae}
 @media(max-width:700px){.zoom-controls{top:auto;bottom:52px;right:10px}.zoom-controls button{width:30px;height:30px;font-size:14px}}
+
+/* ---- Đăng nhập / Đăng ký & lưu game online (thêm mới, không sửa CSS cũ) ---- */
+.auth-status{min-height:16px;margin:10px 0 4px;font-size:11.5px;color:#e6b25c;letter-spacing:.2px;line-height:1.5}
+.auth-status.ok{color:#7fd8a0}
+.auth-status.error{color:#e08080}
+.topbar-right{flex-wrap:wrap;justify-content:flex-end}
+.account-button{width:auto;padding:8px 12px;font-size:9px;color:#cddbe9;background:#142338;border-color:#2b4057}
+.account-button:hover{background:#1c334e;border-color:#46627f}
+.save-status{font-size:9px;letter-spacing:.5px;color:#5c7188;align-self:center;white-space:nowrap}
+@media(max-width:700px){.save-status{display:none}.account-button{padding:7px 9px;font-size:8px}}
