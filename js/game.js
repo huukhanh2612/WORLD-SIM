@@ -1739,3 +1739,16 @@ function frameLoop(ts){
         requestAnimationFrame(frameLoop);
     });
 })();
+
+/* ----------------------------------------------------------------------
+ * (Hệ thống tài khoản & lưu game online — js/auth.js)
+ * Khối này KHÔNG thay đổi bất kỳ logic/gameplay nào ở trên — chỉ export
+ * ra các tham chiếu sẵn có (object `game` và các hàm điều khiển màn hình/
+ * vòng lặp mô phỏng) để js/auth.js có thể đọc và ghi trạng thái, phục vụ
+ * việc lưu/tải tiến trình theo tài khoản. Không có dòng nào phía trên bị
+ * sửa đổi.
+ * -------------------------------------------------------------------- */
+window.WorldSim = {
+    game, createWorld, start, stop, update, showScreen, resizeCanvas, drawWorld,
+    closeSettlementModal
+};
