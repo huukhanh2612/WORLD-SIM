@@ -55,9 +55,13 @@
     const el = (id)=>document.getElementById(id);
     const authScreen = el("authScreen");
     const authTitle = el("authTitle");
+    const authNameField = el("authNameField");
+    const authNameInput = el("authNameInput");
     const authEmailInput = el("authEmailInput");
     const authPasswordInput = el("authPasswordInput");
     const authStatus = el("authStatus");
+    const worldListProfileBar = el("worldListProfileBar");
+    const topbarProfileBadge = el("topbarProfileBadge");
     const authSubmitButton = el("authSubmitButton");
     const authToggleModeButton = el("authToggleModeButton");
     const logoutButton = el("logoutButton");
@@ -97,10 +101,12 @@
             if(authTitle) authTitle.textContent = "Đăng nhập";
             if(authSubmitButton) authSubmitButton.textContent = "ĐĂNG NHẬP";
             if(authToggleModeButton) authToggleModeButton.textContent = "Chưa có tài khoản? Đăng ký ngay";
+            authNameField?.classList.add("hidden");
         } else {
             if(authTitle) authTitle.textContent = "Đăng ký";
             if(authSubmitButton) authSubmitButton.textContent = "ĐĂNG KÝ";
             if(authToggleModeButton) authToggleModeButton.textContent = "Đã có tài khoản? Đăng nhập";
+            authNameField?.classList.remove("hidden");
         }
     }
     authToggleModeButton?.addEventListener("click", ()=>{
@@ -116,8 +122,10 @@
     authSubmitButton?.addEventListener("click", async ()=>{
         const email = (authEmailInput?.value || "").trim();
         const password = authPasswordInput?.value || "";
+        const displayName = (authNameInput?.value || "").trim();
         if(!email || !password){ setAuthStatus("Vui lòng nhập đầy đủ email và mật khẩu.", "error"); return; }
         if(password.length < 6){ setAuthStatus("Mật khẩu cần tối thiểu 6 ký tự.", "error"); return; }
+        if(authMode === "register" && !displayName){ setAuthStatus("Vui lòng nhập tên người chơi.", "error"); return; }
 
         setBusy(true);
         setAuthStatus(authMode === "login" ? "Đang đăng nhập..." : "Đang tạo tài khoản...");
@@ -130,7 +138,12 @@
                 const { data, error } = await sb.auth.signUp({ email, password });
                 if(error) throw error;
                 if(data.session){
-                    // Dự án đã tắt xác nhận email → có phiên đăng nhập ngay
+                    // Dự án đã tắt xác nhận email → có phiên đăng nhập ngay: khởi tạo hồ sơ
+                    // người chơi (tên hiển thị + cấp bậc/thắng-thua bắt đầu từ 0).
+                    try{
+                        const { data: updated } = await sb.auth.updateUser({ data:{ display_name: displayName, level: 1, wins: 0, losses: 0 } });
+                        if(updated && updated.user) currentUser = updated.user;
+                    }catch(e){ /* best effort — hồ sơ sẽ dùng giá trị mặc định nếu lỗi */ }
                     setAuthStatus("Tạo tài khoản thành công!", "ok");
                 } else {
                     setAuthStatus("Đã tạo tài khoản. Hãy kiểm tra email để xác nhận, sau đó đăng nhập.", "ok");
@@ -168,6 +181,44 @@
         if(/invalid login credentials/i.test(msg)) return "Sai email hoặc mật khẩu.";
         if(/rate limit/i.test(msg)) return "Thao tác quá nhanh, vui lòng thử lại sau ít phút.";
         return msg || "Đã có lỗi xảy ra, vui lòng thử lại.";
+    }
+
+    // ---------------------------------------------------------------------
+    // 4b) Hồ sơ người chơi: Tên hiển thị, Cấp bậc, Thắng/Thua (V9.0)
+    // Lưu trong user_metadata của Supabase Auth (không cần bảng riêng) — nhờ
+    // đó đồng bộ theo tài khoản trên mọi thiết bị giống hệt cơ chế đăng nhập.
+    // ---------------------------------------------------------------------
+    function getProfileMeta(){
+        const meta = (currentUser && currentUser.user_metadata) || {};
+        return {
+            displayName: meta.display_name || (currentUser && currentUser.email) || "Người chơi",
+            level: Number(meta.level) || 1,
+            wins: Number(meta.wins) || 0,
+            losses: Number(meta.losses) || 0
+        };
+    }
+    function renderProfileBar(){
+        if(!currentUser) return;
+        const p = getProfileMeta();
+        const text = `👤 ${p.displayName} · Cấp ${p.level} · Thắng ${p.wins} / Thua ${p.losses}`;
+        if(worldListProfileBar) worldListProfileBar.textContent = text;
+        if(topbarProfileBadge) topbarProfileBadge.textContent = text;
+    }
+    // Cộng dồn thắng/thua và tăng cấp (khi thắng) sau khi một ván kết thúc.
+    async function bumpProfileStats({ wins = 0, losses = 0, levelUp = false } = {}){
+        if(!currentUser) return;
+        const cur = getProfileMeta();
+        const next = {
+            display_name: cur.displayName,
+            wins: cur.wins + wins,
+            losses: cur.losses + losses,
+            level: cur.level + (levelUp ? 1 : 0)
+        };
+        try{
+            const { data, error } = await sb.auth.updateUser({ data: next });
+            if(!error && data && data.user) currentUser = data.user;
+        }catch(err){ console.warn("[WorldSim/Auth] Không cập nhật được hồ sơ người chơi.", err); }
+        renderProfileBar();
     }
 
     // ---------------------------------------------------------------------
@@ -363,21 +414,32 @@
     // Một thế giới mới vừa được tạo (nút "BẮT ĐẦU THẾ GIỚI") → lưu ngay lần đầu
     // (currentWorldId đang null vào lúc này nên sẽ tạo một dòng MỚI, không đè lên thế giới khác).
     observeShowToggle("gameScreen", ()=>{ hasActiveWorld = true; scheduleImportantSave(); });
-    // Vương quốc người chơi sụp đổ → lưu lại trạng thái cuối NGAY (không debounce, vì
-    // hasActiveWorld sẽ bị tắt ngay sau đó khiến lần lưu debounce phía sau bị bỏ qua),
-    // rồi mới dừng autosave định kỳ.
-    observeShowToggle("endgameScreen", ()=>{
-        if(hasActiveWorld){
-            saveGameState("endgame").catch(()=>{}).finally(()=>{ hasActiveWorld = false; });
-        } else {
-            hasActiveWorld = false;
-        }
-    });
-    // Người chơi bấm "VỀ TRANG TẠO THẾ GIỚI" sau khi vương quốc sụp đổ → thế giới tiếp theo
-    // là một thế giới HOÀN TOÀN MỚI, không được ghi đè lên thế giới vừa sụp đổ.
+    // Lưu ý: trước đây khi màn hình endgame hiện ra, hệ thống lưu lại trạng thái cuối.
+    // Giờ ván đấu kết thúc (thắng/thua) phải XÓA thế giới khỏi danh sách thay vì lưu —
+    // xem listener "worldsim:game-ended" ở trên, được game.js phát ra ngay khi thắng/thua.
+    // Người chơi bấm "VỀ TRANG TẠO THẾ GIỚI" sau khi ván kết thúc → thế giới tiếp theo
+    // là một thế giới HOÀN TOÀN MỚI, không được ghi đè lên thế giới vừa kết thúc.
     el("endgameRestartButton")?.addEventListener("click", ()=>{
         currentWorldId = null;
         hasActiveWorld = false;
+    });
+
+    // (V9.0) Ván đấu kết thúc — dù THẮNG hay THUA — thế giới đó phải bị xóa khỏi
+    // danh sách thế giới đã lưu (không lưu lại trạng thái cuối như trước nữa), và
+    // hồ sơ người chơi (thắng/thua/cấp bậc) được cập nhật tương ứng.
+    window.addEventListener("worldsim:game-ended", async (e)=>{
+        const result = e.detail && e.detail.result; // "victory" | "defeat"
+        hasActiveWorld = false;
+        try{
+            if(currentUser && currentWorldId){
+                const { error } = await sb.from(SAVE_TABLE).delete().eq("id", currentWorldId).eq("user_id", currentUser.id);
+                if(error) throw error;
+            }
+        }catch(err){ console.warn("[WorldSim/Auth] Không xóa được thế giới đã kết thúc khỏi danh sách.", err); }
+        try{ if(currentUser) localStorage.removeItem(localKey(currentUser.id, currentWorldId)); }catch(e){}
+        currentWorldId = null;
+        if(result === "victory") await bumpProfileStats({ wins: 1, levelUp: true });
+        else if(result === "defeat") await bumpProfileStats({ losses: 1 });
     });
 
     document.addEventListener("visibilitychange", ()=>{
@@ -513,6 +575,7 @@
         // Yêu cầu: sau khi đăng nhập luôn hiện màn hình DANH SÁCH THẾ GIỚI,
         // được tải trực tiếp từ Supabase (không phụ thuộc localStorage) —
         // để mọi thiết bị đăng nhập cùng tài khoản đều thấy đúng danh sách.
+        renderProfileBar();
         await openWorldListScreen();
         startAutosaveLoop();
     }
@@ -527,8 +590,11 @@
         setSaveStatus("");
         setAuthStatus("");
         setWorldListStatus("");
+        if(worldListProfileBar) worldListProfileBar.textContent = "";
+        if(topbarProfileBadge) topbarProfileBadge.textContent = "";
         if(authEmailInput) authEmailInput.value = "";
         if(authPasswordInput) authPasswordInput.value = "";
+        if(authNameInput) authNameInput.value = "";
         showAuthScreen(true);
     }
 
