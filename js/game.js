@@ -688,6 +688,7 @@ function simulateYear(){
     simulateMilitaryTraining(); // Tuyển mộ binh lính từ dân thường dựa trên khí tài
     simulateRaids();
     formCountries();
+    if(game.countries.length>1) game.everHadRivalCountries=true; // (V9.0) ghi nhớ để điều kiện thắng không kích hoạt ngay khi vừa lập quốc đơn độc
     simulateGovernment(); // Vua chúa già đi, truyền ngôi, thay đổi triều thần
     simulateAlliances(); // Kết minh / tan rã liên minh giữa các quốc gia
     simulateWars();
@@ -695,6 +696,7 @@ function simulateYear(){
     checkPlayerKingdomOpportunity();
     checkPlayerCountryCollapse();
     pruneCollapsedCountries();
+    checkPlayerVictory();
 }
 
 function simulateWeather(){
@@ -1376,7 +1378,7 @@ function choosePlayerSettlement(id){
 }
 
 /* ---------------------------- LẬP VƯƠNG QUỐC / CHƯ HẦU (V5.0) ---------------------------- */
-const KINGDOM_RESOURCE_THRESHOLD=4000;
+const KINGDOM_RESOURCE_THRESHOLD=1500; // (Giảm tiêu chí lập quốc) trước là 4000 — hạ xuống để người chơi lập quốc nhanh hơn
 function checkPlayerKingdomOpportunity(){
     if(!game.playerSettlement || game.playerCountry || game.awaitingKingdomChoice) return;
     const s=getSettlement(game.playerSettlement);
@@ -1408,7 +1410,7 @@ function triggerKingdomChoice(s){
 }
 function closeKingdomChoice(){
     const s=getSettlement(game.playerSettlement);
-    game.kingdomChoiceNextThreshold=(s?s.resources:KINGDOM_RESOURCE_THRESHOLD)+2500;
+    game.kingdomChoiceNextThreshold=(s?s.resources:KINGDOM_RESOURCE_THRESHOLD)+900; // trước là +2500 — giảm để cơ hội lập quốc quay lại sớm hơn
     game.awaitingKingdomChoice=false;
     document.getElementById("kingdomChoiceModal")?.classList.add("hidden");
     start();
@@ -1571,14 +1573,55 @@ function pruneCollapsedCountries(){
     }
     game.countries=game.countries.filter(c=>!collapsed.includes(c));
 }
+function notifyGameEnded(result){
+    // Báo cho js/auth.js biết trận đấu đã kết thúc (thắng hoặc thua) để xóa
+    // thế giới này khỏi danh sách lưu và cập nhật cấp bậc/thắng-thua của người chơi.
+    try{ window.dispatchEvent(new CustomEvent("worldsim:game-ended", { detail:{ result } })); }catch(e){}
+}
 function triggerEndgame(lostCountry){
     stop();
+    const icon=document.getElementById("endgameIcon"), label=document.getElementById("endgameLabel"), title=document.getElementById("endgameTitle");
+    if(icon) icon.textContent="💀";
+    if(label) label.textContent="VƯƠNG QUỐC ĐÃ SỤP ĐỔ";
+    if(title) title.textContent="ENDGAME";
     const sub=document.getElementById("endgameSubtitle");
     const detail=document.getElementById("endgameDetail");
     if(sub) sub.textContent=`Vương quốc ${lostCountry?lostCountry.name:"của anh"} đã diệt vong sau ${game.year} năm tồn tại.`;
     if(detail) detail.innerHTML=`<p>Mọi làng mạc, binh lính và khí tài đều đã mất về tay đối phương.</p><p>Lịch sử thế giới ${game.worldName} sẽ được viết tiếp bởi những kẻ khác.</p>`;
     showScreen("endgameScreen");
     game.playerCountry=null; game.playerSettlement=null;
+    notifyGameEnded("defeat");
+}
+
+/* ---------------------------- CHIẾN THẮNG KHI THỐNG NHẤT TOÀN BỘ BẢN ĐỒ (V9.0) ---------------------------- */
+// Người chơi thắng khi trên bản đồ chỉ còn lại làng/quốc gia thuộc về chính
+// vương quốc của người chơi hoặc các nước đồng minh của họ — nghĩa là mọi
+// quốc gia đối địch (không phải đồng minh) đã bị loại khỏi bản đồ.
+function checkPlayerVictory(){
+    if(!game.playerCountry || !game.everHadRivalCountries) return;
+    const pc=getCountry(game.playerCountry);
+    if(!pc || !pc.settlements || !pc.settlements.length) return;
+    const allyIds=new Set([pc.id, ...((pc.allies)||[])]);
+    const rivalCountries=game.countries.filter(c=>c.settlements && c.settlements.length && !allyIds.has(c.id));
+    if(rivalCountries.length>0) return;
+    // Vẫn còn làng độc lập (chưa thuộc quốc gia nào) trên bản đồ thì thế giới chưa được thống nhất hẳn.
+    const independentVillages=game.settlements.some(s=>!s.country && s.population>0);
+    if(independentVillages) return;
+    triggerVictory(pc);
+}
+function triggerVictory(winningCountry){
+    stop();
+    const icon=document.getElementById("endgameIcon"), label=document.getElementById("endgameLabel"), title=document.getElementById("endgameTitle");
+    if(icon) icon.textContent="🏆";
+    if(label) label.textContent="THỐNG NHẤT THIÊN HẠ";
+    if(title) title.textContent="CHIẾN THẮNG";
+    const sub=document.getElementById("endgameSubtitle");
+    const detail=document.getElementById("endgameDetail");
+    if(sub) sub.textContent=`${winningCountry?winningCountry.name:"Vương quốc của anh"} đã thống nhất toàn bộ bản đồ sau ${game.year} năm!`;
+    if(detail) detail.innerHTML=`<p>Mọi thế lực đối địch đều đã bị khuất phục hoặc trở thành đồng minh.</p><p>Lịch sử thế giới ${game.worldName} sẽ mãi ghi danh chiến công này.</p>`;
+    showScreen("endgameScreen");
+    game.playerCountry=null; game.playerSettlement=null;
+    notifyGameEnded("victory");
 }
 
 function handleCanvasClick(e){
@@ -1588,6 +1631,12 @@ function handleCanvasClick(e){
     const zoom=(game.view&&game.view.zoom)||1;
     let bestS=null, bd=Math.max(.028,14/Math.min(w,h))/zoom;
     for(const s of game.settlements){ const d=dist(s,{x:fx,y:fy}); if(d<bd){ bd=d; bestS=s; } }
+    if(pendingPowerTarget==="lightning"){
+        // Đang trong chế độ ngắm quyền năng: nhấp vào làng để tấn công thay vì mở modal thông tin
+        if(bestS){ castLightning(bestS.id); playSfx("click"); }
+        else addEvent(`🎯 Chưa chọn được làng nào — hãy nhấp chính xác vào một ngôi làng trên bản đồ.`);
+        return;
+    }
     if(bestS) openSettlementModal(bestS);
 }
 
@@ -1721,15 +1770,42 @@ let lightningFx=null; // hiệu ứng chớp sáng tạm thời khi vẽ — KH�
 // Sấm Sét — miễn phí, hồi chiêu 160s THẬT (mốc thời gian Date.now() lưu vào
 // game.powers.lightningNextAt) nên không reset khi F5 / đăng xuất / đăng
 // nhập ở thiết bị khác. Có tác dụng thật: gây thương vong cho dân làng và
-// thiêu rụi một phần kho gỗ tại một ngôi làng ngẫu nhiên.
-function castLightning(){
+// thiêu rụi một phần kho gỗ. (V9.0) Giờ đây BẮT BUỘC phải chọn đích ngắm —
+// người chơi bấm nút để vào chế độ ngắm rồi nhấp vào đúng ngôi làng muốn
+// tấn công trên bản đồ, không còn giáng ngẫu nhiên xuống làng bất kỳ nữa.
+let pendingPowerTarget=null; // "lightning" khi đang chờ người chơi chọn làng mục tiêu trên bản đồ
+
+function beginLightningTargeting(){
+    const p=ensurePowersState();
+    if(Date.now() < p.lightningNextAt) return;
+    pendingPowerTarget="lightning";
+    updateTargetingUI();
+    addEvent(`🎯 Hãy nhấp vào một ngôi làng trên bản đồ để giáng Sấm Sét xuống đó (nhấp lại nút hoặc Esc để hủy).`);
+}
+function cancelPowerTargeting(){
+    if(!pendingPowerTarget) return;
+    pendingPowerTarget=null;
+    updateTargetingUI();
+}
+function updateTargetingUI(){
+    if(canvas) canvas.style.cursor = pendingPowerTarget ? "crosshair" : "grab";
+    const btn=document.getElementById("castLightningButton");
+    if(btn) btn.textContent = pendingPowerTarget==="lightning" ? "ĐANG CHỌN LÀNG... (bấm để hủy)" : "DÙNG SẤM SÉT";
+    const hint=document.getElementById("mapHint");
+    if(hint) hint.textContent = pendingPowerTarget==="lightning"
+        ? "🎯 Chế độ ngắm Sấm Sét: nhấp vào một ngôi làng để tấn công, hoặc nhấn Esc để hủy."
+        : "Thế giới đang tự vận động... Nhấp vào làng để xem chi tiết. Cuộn/kéo để phóng to.";
+}
+function castLightning(targetId){
     const p=ensurePowersState();
     const now=Date.now();
     if(now < p.lightningNextAt) return false;
-
-    const candidates=game.settlements.filter(s=>s.population>0);
-    if(candidates.length){
-        const s=pick(candidates);
+    const s=getSettlement(targetId);
+    if(!s || !(s.population>0)){
+        addEvent(`⚡ Không thể giáng Sấm Sét — làng mục tiêu không hợp lệ hoặc đã không còn dân cư.`);
+        return false;
+    }
+    {
         const victims=alive().filter(person=>person.settlement===s.id);
         const hitCount=Math.min(victims.length, ri(1,3));
         for(let i=0;i<hitCount;i++){
@@ -1744,10 +1820,10 @@ function castLightning(){
             : `⚡ Sấm sét giáng xuống ${s.name} nhưng may mắn không gây thương vong.`, true);
         lightningFx={ x:s.x, y:s.y, until:Date.now()+450 };
         update();
-    } else {
-        addEvent(`⚡ Sấm sét vang rền khắp thế giới nhưng chưa có ngôi làng nào để giáng xuống.`);
     }
 
+    pendingPowerTarget=null;
+    updateTargetingUI();
     p.lightningNextAt=now+LIGHTNING_COOLDOWN_MS;
     renderPowersPanel();
     notifyPowersChanged();
@@ -1878,7 +1954,11 @@ function tickPowersCooldown(force){
 
 function setupPowers(){
     ensurePowersState();
-    document.getElementById("castLightningButton")?.addEventListener("click", ()=>{ playSfx("click"); castLightning(); });
+    document.getElementById("castLightningButton")?.addEventListener("click", ()=>{
+        playSfx("click");
+        if(pendingPowerTarget==="lightning") cancelPowerTargeting();
+        else beginLightningTargeting();
+    });
     document.getElementById("watchAdButton")?.addEventListener("click", handleWatchAd);
     document.querySelectorAll(".powers-list").forEach(list=>{
         list.addEventListener("click",(e)=>{
@@ -1930,7 +2010,7 @@ function setup(){
     });
     canvas?.addEventListener("click",handleCanvasClick);
     window.addEventListener("resize",resizeCanvas);
-    document.addEventListener("keydown",e=>{ if(e.code==="Escape") closeSettlementModal(); });
+    document.addEventListener("keydown",e=>{ if(e.code==="Escape"){ cancelPowerTargeting(); closeSettlementModal(); } });
 
     document.getElementById("zoomIn")?.addEventListener("click",()=>zoomAt(canvas.getBoundingClientRect().left+canvas.clientWidth/2,canvas.getBoundingClientRect().top+canvas.clientHeight/2,1.35));
     document.getElementById("zoomOut")?.addEventListener("click",()=>zoomAt(canvas.getBoundingClientRect().left+canvas.clientWidth/2,canvas.getBoundingClientRect().top+canvas.clientHeight/2,1/1.35));
