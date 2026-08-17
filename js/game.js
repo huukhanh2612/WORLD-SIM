@@ -1572,7 +1572,7 @@ function handleCanvasClick(e){
 /* ---------------------------- ÂM THANH: NHẠC NỀN & HIỆU ỨNG (V6.0) ----------------------------
  * Toàn bộ âm thanh được tổng hợp trực tiếp bằng Web Audio API (không cần file .mp3 bên ngoài),
  * gồm 1 lớp nhạc nền êm dịu phát nền liên tục + các hiệu ứng ngắn cho sự kiện quan trọng. */
-let audioCtx=null, musicNodes=null, musicPlaying=false, audioMuted=false;
+let audioCtx=null, musicNodes=null, musicPlaying=false, audioMuted=false, volumeScale=.7;
 function ensureAudioCtx(){
     if(!audioCtx){
         try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ audioCtx=null; }
@@ -1590,10 +1590,10 @@ const SFX_PATTERNS={
     found:      [{f:330,d:.18,type:"triangle"},{f:415.3,d:.18,type:"triangle",delay:.1},{f:493.88,d:.18,type:"triangle",delay:.2},{f:659.25,d:.45,type:"triangle",delay:.32}]
 };
 function playSfx(type){
-    if(audioMuted) return;
+    if(audioMuted||volumeScale<=0) return;
     const ctx=ensureAudioCtx(); if(!ctx) return;
     const now=ctx.currentTime;
-    const master=ctx.createGain(); master.gain.value=0.16; master.connect(ctx.destination);
+    const master=ctx.createGain(); master.gain.value=0.16*volumeScale; master.connect(ctx.destination);
     const seq=SFX_PATTERNS[type]||SFX_PATTERNS.click;
     for(const note of seq){
         const osc=ctx.createOscillator(), gain=ctx.createGain();
@@ -1610,7 +1610,7 @@ function startMusic(){
     if(audioMuted) return;
     const ctx=ensureAudioCtx(); if(!ctx||musicPlaying) return;
     musicPlaying=true;
-    const master=ctx.createGain(); master.gain.value=0.05; master.connect(ctx.destination);
+    const master=ctx.createGain(); master.gain.value=0.05*volumeScale; master.connect(ctx.destination);
     const padFreqs=[130.81,164.81,196.0,246.94]; // hợp âm nền êm dịu (Cm)
     const oscs=[];
     padFreqs.forEach((f,i)=>{
@@ -1640,12 +1640,21 @@ function toggleAudio(){
 }
 function updateAudioButton(){
     const btn=document.getElementById("audioToggle");
-    if(btn) btn.textContent=audioMuted?"🔇":"🔊";
+    if(btn) btn.textContent=(audioMuted||volumeScale<=0)?"🔇":"🔊";
+}
+// Điều chỉnh âm lượng chung (nhạc nền + hiệu ứng), v từ 0 đến 1. Không ảnh hưởng gameplay.
+function setVolume(v){
+    volumeScale=clamp(v,0,1);
+    if(musicNodes && musicNodes.master && audioCtx) musicNodes.master.gain.setTargetAtTime(0.05*volumeScale, audioCtx.currentTime, .2);
+    updateAudioButton();
 }
 
 function setup(){
     document.getElementById("startButton")?.addEventListener("click",()=>{ startMusic(); playSfx("click"); showScreen("setupScreen"); });
     document.getElementById("audioToggle")?.addEventListener("click",toggleAudio);
+    const volSlider=document.getElementById("volumeSlider");
+    if(volSlider){ volSlider.value=Math.round(volumeScale*100); volSlider.addEventListener("input",()=>setVolume(volSlider.value/100)); }
+    updateAudioButton();
     document.getElementById("acceptWarButton")?.addEventListener("click",()=>resolveWarProposal(true));
     document.getElementById("declineWarButton")?.addEventListener("click",()=>resolveWarProposal(false));
     document.getElementById("backToIntro")?.addEventListener("click",()=>showScreen("introScreen"));
