@@ -627,8 +627,8 @@ function createWorld(){
     game.view={zoom:1,ox:0,oy:0};
     game.playerSettlement=null; game.playerCountry=null; game.awaitingPlayerChoice=false; game.awaitingKingdomChoice=false; game.kingdomChoiceNextThreshold=0;
 
-    game.settlementTarget=ri(3,7); game.firstCountryYear=ri(55,100); game.secondCountryYear=ri(115,175);
-    game.expansionYear=ri(190,260); game.warEligibleYear=ri(130,190); game.majorWarYear=ri(210,275);
+    game.settlementTarget=ri(8,16); game.firstCountryYear=ri(35,60); game.secondCountryYear=ri(70,110);
+    game.expansionYear=ri(90,140); game.warEligibleYear=ri(60,100); game.majorWarYear=ri(120,170);
     createTerrain(); ensureWeatherAssets();
 
     // Tổng tài nguyên map (gỗ, sắt, đồng, vàng, kim cương) suy ra từ các mỏ/rừng vừa tạo
@@ -661,6 +661,7 @@ function simulateYear(){
     generateHistory();
     checkPlayerKingdomOpportunity();
     checkPlayerCountryCollapse();
+    pruneCollapsedCountries();
 }
 
 function simulateWeather(){
@@ -807,8 +808,8 @@ function updateGatherTasks(dt){
 function simulateEconomy() {
     for(const s of game.settlements){
         if(!s.stock) s.stock={wood:0,iron:0,copper:0,gold:0,diamond:0};
-        const passiveWood=Math.floor(s.population*rnd(0.5,1.5));
-        s.stock.wood=(s.stock.wood||0)+passiveWood;
+        // (V5.1) Đã bỏ sản sinh gỗ thụ động "ảo" không lấy từ bản đồ — trước đây gây lệch lớn
+        // giữa tổng tài nguyên map và tổng kho các làng. Giờ mọi tài nguyên đều phải khai thác từ mỏ/rừng thật.
 
         // Chế tạo Khí tài quân sự từ Sắt & Đồng dự trữ
         const ironUse=Math.floor((s.stock.iron||0)*0.18);
@@ -876,15 +877,18 @@ function makeSettlement(base){
 // ---- Tuyển quân: dân thường trở thành binh lính dựa trên khí tài sẵn có (V4.0) ----
 function simulateMilitaryTraining(){
     // Quy định bắt buộc: cứ 3 người dân làng phải có 1 lính (V5.0)
+    // (V5.1) Tốc độ tuyển/giải ngũ giờ tỉ lệ theo quy mô làng, không còn cố định 1-3 người/năm,
+    // nếu không quân số sẽ tụt hậu rất xa so với dân số ở các làng lớn.
     for(const s of game.settlements){
         if(s.soldiers===undefined) s.soldiers=0;
         const target=clamp(Math.floor(s.population/3),0,s.population);
+        const pace=Math.max(3, Math.ceil(s.population*0.12));
         if(s.soldiers<target){
-            const need=Math.min(target-s.soldiers, ri(1,3));
+            const need=Math.min(target-s.soldiers, pace);
             const recruits=game.population.filter(p=>p.alive&&p.settlement===s.id&&p.role==="civilian"&&p.age>=16&&p.age<=50&&!p.task).slice(0,need);
             for(const p of recruits){ p.role="soldier"; s.soldiers++; }
         } else if(s.soldiers>target){
-            const excess=Math.min(s.soldiers-target, ri(1,3));
+            const excess=Math.min(s.soldiers-target, pace);
             const demote=game.population.filter(p=>p.alive&&p.settlement===s.id&&p.role==="soldier").slice(0,excess);
             for(const p of demote){ p.role="civilian"; s.soldiers=Math.max(0,s.soldiers-1); }
         }
@@ -894,13 +898,16 @@ function simulateMilitaryTraining(){
 
 function simulateSettlements(){
     for(const s of game.settlements) s.population=alive().filter(p=>p.settlement===s.id).length;
-    if(game.year>=6 && game.settlements.length<(game.settlementTarget||5) && Math.random()<0.1+game.year*0.0012){
-        const base=pick(alive());
+    // (V5.1) Trước đây pick(alive()) chọn bừa 1 người bất kỳ (kể cả người đã có làng), khiến làng mới
+    // hình thành gần như trống rỗng rồi nhanh chóng bị xóa sổ. Giờ ưu tiên người dân chưa có làng (lang thang độc lập).
+    if(game.year>=5 && game.settlements.length<(game.settlementTarget||10) && Math.random()<0.22+game.year*0.002){
+        const unsettled=alive().filter(p=>!p.settlement);
+        const base=unsettled.length ? pick(unsettled) : pick(alive());
         if(base){
             const s=makeSettlement(base); game.settlements.push(s);
             let count=0;
-            for(const p of alive()) if(dist(p,s)<.075){ p.settlement=s.id; p.tx=s.x; p.ty=s.y; count++; }
-            if(count<6){ for(const p of alive().filter(p=>!p.settlement).slice(0,8)) if(dist(p,s)<.16){ p.settlement=s.id; p.tx=s.x; p.ty=s.y; } }
+            for(const p of alive()) if(!p.settlement && dist(p,s)<.09){ p.settlement=s.id; p.tx=s.x; p.ty=s.y; count++; }
+            if(count<6){ for(const p of alive().filter(p=>!p.settlement).slice(0,10)) if(dist(p,s)<.2){ p.settlement=s.id; p.tx=s.x; p.ty=s.y; } }
             s.population=alive().filter(p=>p.settlement===s.id).length;
             addEvent(`🏘️ ${s.name} được hình thành, bắt đầu khai thác gỗ và đá xây dựng làng.`,true);
         }
@@ -918,11 +925,13 @@ function simulateSettlements(){
 function simulateRaids(){
     const independents=game.settlements.filter(s=>!s.country && s.population>=10 && s.age>=5);
     const scarcity=1-(game.scarcityRatio!==undefined?game.scarcityRatio:1);
-    const raidChance=0.05+(scarcity>0.5?scarcity*0.09:0);
+    // (V5.1) Khi tài nguyên gần cạn kiệt hoàn toàn, các làng buộc phải tấn công lẫn nhau để sinh tồn —
+    // tỉ lệ tập kích tăng mạnh hơn nhiều so với trước.
+    const raidChance=0.05+(scarcity>0.5?scarcity*0.16:0)+(scarcity>0.85?0.18:0);
     for(const s of independents){
         if(Math.random()>raidChance) continue;
         let target=null,best=.22;
-        const range=scarcity>0.5?.32:.22;
+        const range=scarcity>0.5?.4:.22;
         if(scarcity>0.5){
             // Khi khan hiếm, làng ưu tiên tấn công nơi giàu tài nguyên nhất trong tầm với, thay vì chỉ gần nhất
             let bw=-1;
@@ -1011,9 +1020,9 @@ function formCountries(){
     }
 }
 
-function createCountry(s){
+function createCountry(s, customName){
     const leaderName=s.leader?s.leader.name:randomLeaderName();
-    const c={ id:game.nextCountry++, name:uniqueName(COUNTRY_NAMES), settlements:[s.id], population:s.population,
+    const c={ id:game.nextCountry++, name:(customName&&customName.trim())?customName.trim().slice(0,30):uniqueName(COUNTRY_NAMES), settlements:[s.id], population:s.population,
         totalResources:s.resources, totalMilitary:s.military, totalSoldiers:s.soldiers||0, power:s.population*.4+s.military*.6, color:COLORS[(game.nextCountry-2)%COLORS.length],
         founded:game.year, capital:s.id, treasury:{wood:0,iron:0,copper:0,gold:0,diamond:0}, allies:[] };
     createCourt(c, leaderName);
@@ -1107,7 +1116,10 @@ function simulateWars(){
         const scarcity=1-(game.scarcityRatio!==undefined?game.scarcityRatio:1);
         const resourceDesperate = scarcity>0.55; // tài nguyên đã cạn hơn nửa
         const normalChance = (nearest<.20 && game.year>=game.warEligibleYear) ? 0.045+Math.random()*.03 : 0;
-        const scarcityChance = resourceDesperate && nearest<.32 ? 0.05+scarcity*0.08 : 0;
+        // (V5.1) Càng khan hiếm tài nguyên, các quốc gia càng buộc phải chiến đấu để giành giật —
+        // phạm vi mở rộng và tỉ lệ tuyên chiến tăng mạnh khi tài nguyên gần cạn kiệt.
+        const scarcityRange = scarcity>0.85 ? .6 : .32;
+        const scarcityChance = resourceDesperate && nearest<scarcityRange ? 0.06+scarcity*0.22 : 0;
         if(Math.random()<normalChance+scarcityChance){
             game.wars.push({id:game.nextWar++,a:a.id,b:b.id,age:0,score:0,reason:scarcityChance>normalChance?"resource":"territory"});
             if(scarcityChance>normalChance) addEvent(`⚔️ ${a.name} tuyên chiến với ${b.name} để tranh đoạt tài nguyên đang khan hiếm.`,true);
@@ -1310,6 +1322,8 @@ function triggerKingdomChoice(s){
     })[0];
     const vassalBtn=document.getElementById("becomeVassalButton");
     const sub=document.getElementById("kingdomChoiceSub");
+    const nameInput=document.getElementById("kingdomNameInput");
+    if(nameInput) nameInput.value=uniqueName(COUNTRY_NAMES);
     if(sub) sub.textContent=`${s.name} đã tích lũy ${fmt(s.resources)} tài nguyên — đủ để dựng nghiệp lớn. Anh muốn lập vương quốc riêng, hay làm chư hầu?`;
     if(vassalBtn){
         if(nearestCountry){ vassalBtn.disabled=false; vassalBtn.textContent=`LÀM CHƯ HẦU CHO ${nearestCountry.name.toUpperCase()}`; vassalBtn.dataset.countryId=nearestCountry.id; }
@@ -1327,7 +1341,8 @@ function closeKingdomChoice(){
 function foundPlayerKingdom(){
     const s=getSettlement(game.playerSettlement);
     if(!s){ closeKingdomChoice(); return; }
-    createCountry(s);
+    const chosenName=document.getElementById("kingdomNameInput")?.value||"";
+    createCountry(s, chosenName);
     const c=getCountry(s.country);
     if(c){ c.isPlayerCountry=true; game.playerCountry=c.id; addEvent(`👑 Anh xưng vương, lập nên ${c.name}! Từ nay đây là vương quốc của anh.`,true); }
     game.awaitingKingdomChoice=false;
@@ -1353,6 +1368,19 @@ function checkPlayerCountryCollapse(){
     if(!c || !c.settlements || c.settlements.length===0){
         triggerEndgame(c);
     }
+}
+// (V5.1) Trước đây các quốc gia mất hết làng vẫn nằm mãi trong game.countries, khiến số liệu
+// "Quốc gia" trên bảng thống kê bị thổi phồng sai lệch. Giờ dọn sạch các quốc gia đã diệt vong.
+function pruneCollapsedCountries(){
+    const collapsed=game.countries.filter(c=>!c.settlements || c.settlements.length===0);
+    if(!collapsed.length) return;
+    for(const c of collapsed){
+        if(c.isPlayerCountry) continue; // vương quốc người chơi được xử lý riêng qua ENDGAME
+        addEvent(`💀 ${c.name} đã diệt vong, không còn làng nào dưới quyền.`,true);
+        game.wars=game.wars.filter(w=>w.a!==c.id&&w.b!==c.id);
+        for(const other of game.countries) other.allies=(other.allies||[]).filter(id=>id!==c.id);
+    }
+    game.countries=game.countries.filter(c=>!collapsed.includes(c));
 }
 function triggerEndgame(lostCountry){
     stop();
